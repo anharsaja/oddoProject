@@ -1,7 +1,7 @@
 ---
 id: PRD-001a
 title: Auth — company minimal, user, argon2id, session Redis, dan halaman login
-status: ready
+status: review
 priority: P0
 modules: [core]
 depends_on: [PRD-000]
@@ -701,12 +701,200 @@ menyentuh file yang akan dipakai sepanjang PRD ini.
 
 **Ringkasan yang dikerjakan:**
 
+Seluruh bagian 13 (langkah 1–14) dikerjakan, termasuk utang PRD-000 butir 1–4. Hasilnya:
+orang bisa login sungguhan lewat halaman `/login`, session hidup di Redis dengan sliding
+TTL yang dibatasi umur absolut, dan tiga endpoint `login` / `logout` / `me` bekerja
+sebagaimana §9 menuliskannya.
+
+Empat hal yang perlu diketahui Mentor tentang pendekatannya:
+
+1. **Batas absolut dihitung dari payload, bukan dari TTL Redis.** TTL selalu ditimpa oleh
+   perpanjangan idle, jadi ia tidak bisa menjaga apa pun yang berumur panjang. `createdAt`
+   disimpan di payload dan dibandingkan di setiap pembacaan — persis seperti yang
+   digambarkan diagram §5. Perhitungannya dipisah jadi fungsi murni
+   (`session-ttl.ts`) supaya AC-001a-07 tidak bergantung pada jam dinding.
+2. **`AuthGuard` hanya menyentuh Redis.** Tidak ada query Postgres per request, sesuai §9.
+   `GET /api/auth/me` memang membaca Postgres, tapi itu satu endpoint — bukan setiap request.
+3. **Guard berjalan sebelum interceptor di NestJS.** Karena itu `AuthGuard` menaruh identitas
+   di objek request, dan `RequestIdInterceptor`-lah yang memasukkannya ke `RequestContext`.
+   Urutan sebaliknya mustahil: saat guard berjalan, AsyncLocalStorage belum dibuka.
+4. **Kegagalan Redis dibiarkan naik jadi 500.** `SessionService` tidak pernah menerjemahkan
+   error infrastruktur jadi "session tidak valid" — kalau itu terjadi, seluruh user yang
+   sedang login akan diberi tahu bahwa kredensial mereka salah (§11 no. 1 dan 2).
+
+---
+
 **File yang dibuat/diubah:**
+
+*Utang PRD-000 (bagian A)*
+
+| Path | Perubahan |
+|---|---|
+| `packages/shared/src/api-error.ts` | **baru** — `ApiErrorResponse` + `ApiErrorDetail` pindah ke sini (butir 1) |
+| `packages/shared/src/error-code.ts` | `UNAUTHORIZED` ditambahkan ke enum |
+| `packages/shared/src/index.ts` | mengekspor tipe error yang baru pindah |
+| `apps/api/src/common/api-error.ts` | tinggal logika pemetaan status → code; `401 → UNAUTHORIZED` ditambahkan |
+| `apps/api/src/common/filters/all-exceptions.filter.ts` | tipe diimpor dari `@oddo/shared` |
+| `apps/api/src/common/validation/validation-exception.factory.ts` | idem |
+| `apps/api/src/common/system-setting.keys.ts` | **baru** — satu-satunya deklarasi key `app.version` dan `app.initialized_at` (butir 4) |
+| `apps/api/src/health/health.service.ts` | mengimpor key, tidak lagi mendeklarasikannya |
+| `.env.test` | `LOG_LEVEL` `debug` → `warn` (butir 2) |
+| `apps/api/prisma/schema.prisma` | `@default(now())` pada `SystemSetting.updatedAt` (butir 3) |
+| `prisma/migrations/20260916083255_system_setting_updated_at_default/` | **baru** — migrasi untuk butir 3; migrasi lama tidak disunting |
+
+*Backend auth (bagian B)*
+
+| Path | Peran |
+|---|---|
+| `apps/api/src/config/env.schema.ts` | Empat env var baru + `integerBetween()` + `.refine()` silang idle/absolut |
+| `.env.example`, `.env.test` | Keempat variable, sesuai aturan wajib `ADR-0005` no. 1 |
+| `prisma/migrations/20260916083558_company_and_user/` | **baru** — tabel `company` + `user`, FK `RESTRICT`, dan tiga CHECK constraint yang ditulis tangan |
+| `apps/api/prisma/schema.prisma` | Model `Company` dan `User` sesuai §7.2 |
+| `apps/api/prisma/seed/system.ts` | `seedCompanyAndAdmin()` dalam satu transaksi, keduanya `update: {}` (BR-AUTH-005) |
+| `apps/api/src/core/auth/password.service.ts` | argon2id dengan parameter §2.4 |
+| `apps/api/src/core/auth/session-ttl.ts` | `resolveSessionTtl()` — fungsi murni, inti BR-AUTH-003 dan BR-AUTH-004 |
+| `apps/api/src/core/auth/session.service.ts` | `create` / `read` / `destroy` / `listByUser` + index `user:<id>:sessions` |
+| `apps/api/src/core/auth/session.cookie.ts` | Nama, atribut, pemasangan dan penghapusan cookie |
+| `apps/api/src/core/auth/auth.guard.ts` | Membaca cookie → Redis; mengisi `request.auth` |
+| `apps/api/src/core/auth/auth.service.ts` | Login, logout, dan pembacaan identitas + logging §12.1 |
+| `apps/api/src/core/auth/auth.controller.ts` | Tiga endpoint §9 |
+| `apps/api/src/core/auth/dto/login.dto.ts` | Validasi body login |
+| `apps/api/src/core/auth/auth.module.ts` | Modul; guard sebagai provider biasa (belum `APP_GUARD`) |
+| `apps/api/src/common/context/request-context.ts` | `RequestStore` diperluas `userId` + `companyId`; tipe `RequestAuth` |
+| `apps/api/src/common/decorators/current-user.decorator.ts` | **baru** — `@CurrentUser()` |
+| `apps/api/src/common/interceptors/request-id.interceptor.ts` | Mengangkat identitas dari request ke `RequestContext` |
+| `apps/api/src/common/redis/redis.service.ts` | Getter `connection` untuk pemakai yang butuh pipeline |
+| `apps/api/src/app.setup.ts` | `cookie-parser` lewat Kanal 1 `ADR-0004` |
+| `apps/api/src/app.module.ts` | Mendaftarkan `AuthModule` |
+
+*Web (bagian C)*
+
+| Path | Peran |
+|---|---|
+| `apps/web/src/lib/api-client.ts` | **baru** — `apiFetch()` dengan `credentials: 'include'`, `ApiError`, `ApiUnreachableError` |
+| `apps/web/src/components/ui/input.tsx`, `label.tsx` | **baru** — dua komponen shadcn yang diminta §10 |
+| `apps/web/src/app/login/page.tsx` | **baru** — halaman `/login` |
+
+*Test (bagian D)*
+
+| Path | Yang diuji |
+|---|---|
+| `apps/api/src/core/auth/password.service.spec.ts` | hash/verify, salt acak, hash rusak tidak meledak (5 test) |
+| `apps/api/src/core/auth/session-ttl.spec.ts` | `min(idle, sisa absolut)`, kasus kedaluwarsa (5 test) |
+| `apps/api/src/config/env.schema.spec.ts` | Empat kasus baru: normalisasi email, password pendek, absolut ≤ idle, konfigurasi sah |
+| `apps/api/test/auth-helpers.ts` | **baru** — boot lewat `configureApp`, seed, ekstraksi cookie |
+| `apps/api/test/auth-login.spec.ts` | AC-001a-01 … 04 + §11 no. 9, 10, 11 (8 test) |
+| `apps/api/test/auth-session.spec.ts` | AC-001a-05 … 09 + §11 no. 3 (9 test) |
+| `apps/api/test/auth-session-index.spec.ts` | `listByUser` + penyapuan malas §11 no. 12 (4 test) |
+| `apps/api/test/auth-seed.spec.ts` | AC-001a-10 (3 test) |
+| `apps/api/test/auth-redis-down.spec.ts` | §11 no. 1 dan 2 — 500, bukan 401 (4 test) |
+| `apps/api/test/setup-state.ts` | Dulu `setup-db.ts`; sekarang membersihkan Postgres **dan** key Redis (§15) |
+| `apps/web/test/login-page.test.tsx` | AC-001a-12 (7 test) |
+
+---
 
 **Bukti Acceptance Criteria:**
 
-**Deviasi dari PRD (kalau ada) + alasannya:**
+| AC | Terpenuhi? | Bukti |
+|---|---|---|
+| AC-001a-01 Login berhasil | ya | `auth-login.spec.ts` "accepts the seeded administrator and sets a session cookie": email, `companyId`, `isSuperadmin` dicek; body di-serialisasi lalu dipastikan tidak memuat `passwordHash` maupun sid; header `Set-Cookie` memuat `HttpOnly`, `SameSite=Lax`, `Path=/`. Manual: `curl` memberi `Set-Cookie: oddo_session=…; Max-Age=28800; Path=/; HttpOnly; SameSite=Lax` |
+| AC-001a-02 Session ada di Redis | ya | "records the session and its index entry in Redis": `session:<sid>` ada, payload memuat `userId`/`companyId`/`createdAt`, `TTL > 0` dan `<= 7200`, dan `SISMEMBER user:<id>:sessions <sid>` = 1 |
+| AC-001a-03 Tiga kegagalan identik | ya | "answers unknown email, wrong password and deactivated user identically": ketiga body diserialisasi lalu **dibandingkan satu sama lain**, bukan dicocokkan ke string harapan — sesuai bunyi AC. Ketiganya juga dipastikan tanpa `Set-Cookie`. User nonaktif dibuat di dalam test dengan password yang benar-benar cocok |
+| AC-001a-04 Bentuk error B8 | ya | "keeps the standard error envelope on a failed login": `Object.keys(body).sort()` dicocokkan persis ke enam field, `code = UNAUTHORIZED`, `statusCode = 401` |
+| AC-001a-05 `/me` mengenali pemilik cookie | ya | "identifies the owner of the cookie" (email + id cocok, `absoluteExpiresAt` berjarak 8 jam ± 10 detik dari waktu login) dan "refuses a request with no cookie at all" (401 `UNAUTHORIZED`) |
+| AC-001a-06 Sliding expiration | ya | "slides the idle window forward on every request": TTL diturunkan manual ke 60 detik, `/me` dipanggil, TTL kembali ke > 7190 dan ≤ 7200 |
+| AC-001a-07 Batas absolut | ya | Dua test terpisah. `createdAt` dimundurkan 7 jam 59 menit (`SET … KEEPTTL`) → 200 dan `0 < TTL <= 60`. Dimundurkan 8 jam 1 menit → 401, `EXISTS session:<sid>` = 0, dan `SISMEMBER` = 0 |
+| AC-001a-08 Logout | ya | "kills the session on the server when logging out": 204, cookie dihapus dengan `Max-Age=0`, key hilang, `SREM` terjadi, `/me` berikutnya 401, logout kedua tetap 204. Ditambah "answers logout with 204 even with no cookie at all" |
+| AC-001a-09 Dua session | ya | "keeps two devices independent": index dibersihkan lebih dulu supaya hitungannya bermakna, dua login → SET berisi 2 sid, logout cookie pertama → SET berisi tepat `[sid kedua]`, `/me` dengan cookie kedua tetap 200 |
+| AC-001a-10 Seed create-only | ya | `auth-seed.spec.ts` "never rewrites an existing administrator": `password_hash` diganti jadi penanda, seed dijalankan lagi dengan password berbeda, penanda **masih utuh** dan jumlah baris user tidak berubah |
+| AC-001a-11 Konfigurasi TTL ditolak | ya | Manual: `.env` diisi `SESSION_IDLE_TTL_MINUTES=120` + `SESSION_ABSOLUTE_TTL_HOURS=1`, lalu `pnpm --filter @oddo/api run check:env` → **exit 1**, keluarannya `- SESSION_ABSOLUTE_TTL_HOURS: must be longer than SESSION_IDLE_TTL_MINUTES …` (kedua nama muncul). Dikunci juga oleh unit test "rejects an absolute session limit that the idle window can never reach" |
+| AC-001a-12 Halaman login | ya | `login-page.test.tsx`, 7 test: label terhubung lewat `htmlFor`, `type`/`autocomplete` benar, tombol jadi `Memproses…` + disabled saat request jalan, pesan error muncul dengan `role="alert"` sementara `code` dan `requestId` **tidak** muncul, `router.push('/')` dipanggil saat sukses, dan pesan `Tidak dapat menghubungi server di <API_URL>` saat fetch gagal. Manual: `GET /login` → HTTP 200, HTML memuat judul, subjudul, `for="email"`, `for="password"`, `autoComplete="username"`, `autoComplete="current-password"`, dan tombol `Masuk` |
+| AC-001a-13 Rahasia tidak bocor | ya | Keluaran `pnpm test` ditangkap penuh lalu digrep: nilai `ADMIN_PASSWORD` **0** kemunculan, `oddo_session=` **0**, pola session id **0**, `passwordHash` **0** |
+| AC-001a-14 Pagar kualitas | ya | `pnpm lint` (`--max-warnings=0`), `pnpm typecheck`, `pnpm test`, `pnpm build` — keempatnya exit 0. **72 test API** (13 suite) + **13 test web** (2 file). 0 skipped, 0 todo. `eslint-disable` di seluruh repo: **0** |
+
+---
+
+**Deviasi dari PRD + alasannya:**
+
+| # | Deviasi | Alasan | Dampak |
+|---|---|---|---|
+| D-1 | `ADMIN_EMAIL` di-*lowercase* oleh skema env, bukan ditolak kalau memuat huruf besar | §2.4 menulis tipenya "email, huruf kecil", yang bisa dibaca dua arah. Normalisasi dipilih karena menjamin invariant BR-AUTH-007 tanpa pernah bisa menghasilkan keadaan salah: `.env` bertuliskan `Admin@Oddo.Local` tetap cocok dengan baris yang dibuat seed. Menolaknya hanya memindahkan masalah ke waktu boot | Ditutup unit test "lower-cases ADMIN_EMAIL". Kalau Mentor ingin penolakan keras, perubahannya satu baris |
+| D-2 | `apps/api/test/setup-db.ts` diganti nama jadi `setup-state.ts` | §15 menyuruh menambahkan pembersihan key Redis ke helper test. File bernama `setup-db` yang juga menghapus key Redis adalah nama yang berbohong | Hanya nama file + satu baris di `jest.config.ts` |
+
+**Catatan implementasi yang bukan deviasi, tapi sebaiknya diketahui:**
+
+- `RedisService` mendapat getter `connection` yang mengembalikan klien ioredis. `SessionService`
+  butuh `MULTI`, dan membungkus tiap perintah Redis jadi method passthrough akan menambah
+  lapisan yang tidak memuat satu keputusan pun.
+- `SessionService.destroy()` mengembalikan `userId` (atau `null`) supaya §12.1 bisa mencatat
+  `auth.logout` atas nama seseorang.
+- `@CurrentUser()` diletakkan di `common/decorators/` — persis seperti peta folder `ADR-0002` §1.
+  Tipe `RequestAuth` ikut tinggal di `common/context/`, sehingga `common` tidak perlu mengimpor
+  apa pun dari `core` dan arah dependency tetap benar.
+- Tabel dinamai `user` sesuai §7.2. `user` adalah kata kunci di Postgres; ini aman karena Prisma
+  selalu mengutip identifier, tapi **raw SQL apa pun yang ditulis tangan wajib menulis `"user"`**.
+
+**Tidak ada TODO, mock, atau stub yang tersisa.**
+
+**Dependency yang ditambahkan:** `@node-rs/argon2` (disebut §2.4), `cookie-parser` +
+`@types/cookie-parser` (disebut §13 langkah 9), dan `@radix-ui/react-label` — prasyarat
+komponen shadcn `label` yang diminta §10, sama seperti `@radix-ui/react-slot` untuk `button`
+di PRD-000.
+
+---
 
 **Hal yang perlu diputuskan Mentor untuk PRD berikutnya:**
 
+1. **Waktu respons login membocorkan email mana yang terdaftar.** BR-AUTH-002 dipenuhi untuk
+   *isi* respons, dan itu yang diuji. Tapi email yang tidak terdaftar tidak pernah sampai ke
+   argon2, jadi jawabannya kembali jauh lebih cepat (~1 ms vs ~100 ms). Menutupnya butuh
+   verifikasi dummy terhadap hash palsu. Sengaja tidak dikerjakan karena tidak diminta PRD —
+   layak diputuskan bersama rate limiting dan lockout yang sudah ditunda ke V1.
+2. **PRD-001b harus menaikkan `AuthGuard` jadi `APP_GUARD`.** Saat itu terjadi, setiap endpoint
+   yang belum ditandai akan tertutup. Yang sudah punya `@Public()` hari ini: `GET /api/health`,
+   `POST /api/auth/login`, `POST /api/auth/logout`. Endpoint lain belum ada.
+3. **`listByUser()` belum punya permukaan HTTP.** Ia sudah diuji langsung (4 test), tapi
+   pemakainya baru lahir di PRD-002 saat user dinonaktifkan dan seluruh session-nya dicabut.
+4. **Konstanta nilai `APP_VERSION` (`'0.1.0'`) masih tinggal di seed.** Temuan F-3 menyebut
+   *key* `app.version` yang terduplikasi, dan itu yang disatukan. Kalau nilainya juga ingin
+   dibaca tempat lain, ia perlu rumah sendiri.
+5. **`package.json#prisma` masih deprecated** (warisan PRD-000). Setiap perintah Prisma
+   mencetak peringatan; pindah ke `prisma.config.ts` saat upgrade Prisma 7.
+6. **Butir 5 dan 6 `PRODUCT-SCOPE` §4.1** (plugin ESLint React/Next, dan Playwright) memang
+   dialokasikan ke PRD-001b dan belum dikerjakan di sini.
+
+---
+
 **Cara menjalankan & menguji:**
+
+```bash
+pnpm install
+cp .env.example .env            # PowerShell: Copy-Item .env.example .env
+pnpm docker:up
+pnpm db:migrate
+pnpm db:seed                    # membuat Default Company + admin
+pnpm dev
+```
+
+Buka <http://localhost:3000/login> dan masuk dengan `admin@oddo.local` / `ChangeMe!2026`.
+
+```bash
+# gerbang kualitas (keempatnya harus exit 0)
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+
+# pemeriksaan manual backend
+curl -i -c /tmp/cj -X POST http://localhost:3001/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@oddo.local","password":"ChangeMe!2026"}'      # 200 + Set-Cookie
+
+curl -b /tmp/cj http://localhost:3001/api/auth/me                    # 200, identitas
+curl -X POST -b /tmp/cj http://localhost:3001/api/auth/logout -i     # 204 + Max-Age=0
+curl -b /tmp/cj http://localhost:3001/api/auth/me                    # 401
+
+# konfigurasi TTL yang tidak masuk akal (AC-001a-11)
+# set SESSION_ABSOLUTE_TTL_HOURS=1 di .env, lalu:
+pnpm --filter @oddo/api run check:env                                # exit 1, menyebut kedua variable
+```
