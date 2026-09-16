@@ -93,8 +93,9 @@ muat satu sesi Coder. Alasannya ada di `ADR-0002` bagian "Batas satu PRD".
 | PRD | Judul | Prioritas | Depends on | Inti yang harus jadi |
 |---|---|---|---|---|
 | PRD-000 | Project scaffolding | P0 | — | Monorepo, Docker, Prisma, health check, test runner hijau |
-| PRD-001 | Auth & session | P0 | 000 | Login/logout, argon2id, session Redis, guard, `/me`, halaman login |
-| PRD-002 | Company, User, Role & Permission | P0 | 001 | RBAC, record rule company, audit log, layar Settings |
+| PRD-001a | Auth: bisa login | P0 | 000 | Company minimal + user, argon2id, session Redis (sliding + batas absolut), `/auth/login`, `/auth/logout`, `/auth/me`, halaman `/login` |
+| PRD-001b | Auth: tidak bisa dilewati | P0 | 001a | `AuthGuard` global lewat `APP_GUARD`, penegakan `@Public()`, proteksi route di web, health pindah ke `/health`, shell + logout, Playwright E2E |
+| PRD-002 | Company, User, Role & Permission | P0 | 001b | RBAC, record rule company, audit log, layar Settings |
 | PRD-003 | Sequence, Currency, Tax | P0 | 002 | Penomoran dokumen aman dari race, tabel pajak & currency |
 | PRD-004 | Partner (customer & vendor) | P1 | 002 | Master partner + alamat + kontak, list & form |
 | PRD-005 | UoM, Product Category, Product | P1 | 002 | Produk + konversi UoM (dus ↔ pcs) |
@@ -104,6 +105,55 @@ muat satu sesi Coder. Alasannya ada di `ADR-0002` bagian "Batas satu PRD".
 | PRD-009 | Delivery: reservasi → stock move | P1 | 007, 008 | Sambungan Sales ↔ Inventory. **Ini puncak MVP** |
 
 Urutan ini boleh bergeser kalau ada temuan saat implementasi, tapi **dependency-nya tidak boleh dilanggar**.
+
+### 4.1 Bawaan wajib dari review PRD-000 (2026-09-16)
+
+Baris di bawah ini **bukan saran dan bukan catatan**. Statusnya sama dengan isi PRD:
+PRD yang disebut wajib memuatnya, dan PRD itu tidak boleh berstatus `done` selama
+salah satunya belum dikerjakan. Sumbernya ada di bagian "Review Mentor" di
+[`PRD-000`](prd/PRD-000-project-scaffolding.md).
+
+**Wajib masuk In Scope PRD-001a:**
+
+| # | Yang harus dikerjakan | Asal |
+|---|---|---|
+| 1 | Pindahkan `ApiErrorResponse` dan `ApiErrorDetail` dari `apps/api/src/common/api-error.ts` ke `packages/shared`, lalu web mengimpornya dari `@oddo/shared`. `apps/api` tidak boleh lagi mendeklarasikan bentuk error sendiri | Deviasi D-5 · amandemen `ADR-0001` B8 |
+| 2 | Ubah `LOG_LEVEL` di `.env.test` dari `debug` jadi `warn` | `ADR-0005` §4 |
+| 3 | Tambahkan `@default(now())` pada `updatedAt` di `system_setting` beserta satu file migrasi baru — migrasi lama tidak diedit | Temuan F-1 · amandemen `ADR-0002` §4 |
+| 4 | Satukan konstanta key `app.version`: sekarang dideklarasikan dua kali, di `apps/api/src/health/health.service.ts` dan `apps/api/prisma/seed/system.ts`. Jadikan satu deklarasi yang di-import keduanya | Temuan F-3 |
+| 5 | Pasang plugin ESLint React & Next (`eslint-plugin-react-hooks`, `@next/eslint-plugin-next`) di `packages/config/eslint.base.mjs`, sebelum jumlah halaman bertambah | Pertanyaan Coder #6 |
+| 6 | Playwright + satu E2E alur login sungguhan di browser | Pertanyaan Coder #7 · `ADR-0001` B7 |
+
+PRD-001 **sudah diputuskan dipecah** (owner, 2026-09-16) jadi PRD-001a "bisa login" dan
+PRD-001b "tidak bisa dilewati" — dipecah menurut nilai yang diantarkan, bukan menurut
+layer, supaya keduanya tetap *vertical slice* seperti yang disyaratkan `ADR-0002` §6.
+Butir 1–4 di atas masuk **001a**, butir 5–6 masuk **001b**.
+
+**Wajib masuk PRD-002 sebagai acceptance criteria tersendiri**, ditulis persis seperti
+ini supaya tidak melemah saat disalin:
+
+```text
+AC-002-XX  Batas antar-modul ditegakkan lint, bukan kesepakatan
+
+Given: folder core/, inventory/, dan sales/ sudah ada di apps/api/src
+When:  sebuah file di core/ menambahkan import dari inventory/ atau sales/,
+       ATAU sebuah file di inventory/ menambahkan import dari sales/
+Then:  `pnpm lint` gagal dengan pesan yang menyebut ADR-0002 §1,
+       dan gagalnya terbukti — bukan hanya konfigurasi yang terpasang:
+       PRD-002 wajib menunjukkan satu percobaan import terlarang yang
+       membuat lint merah, lalu dihapus lagi
+```
+
+Zona `import/no-restricted-paths` yang aktif hari ini baru `packages/** ✗→ apps/**`.
+Aturan modul `ADR-0002` §1 belum ditegakkan apa pun kecuali kedisiplinan — dan
+kedisiplinan bukan mekanisme penegakan.
+
+**Utang teknis yang sengaja ditunda** (bukan untuk MVP, tapi jangan sampai hilang):
+
+| Utang | Pemicu untuk mengerjakannya |
+|---|---|
+| `package.json#prisma` deprecated, perlu pindah ke `prisma.config.ts` | Saat upgrade ke Prisma 7, atau saat warning-nya berubah jadi error |
+| Halaman `/` masih halaman health PRD-000 | PRD-001b memindahkannya ke `/health` saat halaman login masuk |
 
 ---
 

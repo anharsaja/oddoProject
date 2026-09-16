@@ -67,6 +67,8 @@ seluruh `docs/adr/*.md` → `docs/prd/README.md` → PRD yang sedang dikerjakan.
 ## Konvensi
 
 - **Penamaan PRD**: `PRD-<3 digit>-<slug-kebab-case>.md`, contoh `PRD-004-inventory-stock-move.md`.
+  Kalau satu PRD terlanjur dipecah setelah nomornya beredar, pecahannya memakai sufiks huruf
+  berurutan (`PRD-001a`, `PRD-001b`) — nomor yang sudah dipakai tidak didaur ulang.
 - **Penamaan ADR**: `ADR-<4 digit>-<slug-kebab-case>.md`.
 - **Status PRD**: `draft` → `ready` → `in-progress` → `review` → `done`; plus `blocked`.
   Status ditulis di frontmatter PRD **dan** di `docs/prd/README.md` — keduanya harus sinkron.

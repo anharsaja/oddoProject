@@ -135,6 +135,16 @@ bukan diabaikan diam-diam.
 
 Pengecualian: validasi **environment variable** saat boot pakai `zod`, karena itu
 di luar sistem DI dan harus gagal keras sebelum aplikasi menerima request.
+Detail operasionalnya — file env mana, siapa yang memvalidasi, dan bagaimana test
+dipisahkan — ada di `ADR-0005`.
+
+> **Amandemen 2026-09-16 (review PRD-000, temuan F-2).** `apps/api` mematikan satu flag
+> TypeScript: `strictPropertyInitialization: false`. Ini **disetujui** dan berlaku khusus
+> untuk `apps/api`, karena DTO `class-validator` dan property injection NestJS memang
+> mengisi field-nya di luar constructor. Kompensasinya wajib: field DTO memakai definite
+> assignment (`name!: string`), bukan tipe opsional yang menyembunyikan nilai `undefined`
+> ke dalam business logic. Flag strict lainnya — termasuk `noUncheckedIndexedAccess` dan
+> `exactOptionalPropertyTypes` — tetap menyala di `packages/config/tsconfig.base.json`.
 
 ### B7. Test runner → **Jest di `apps/api`, Vitest di `apps/web`**
 
@@ -174,6 +184,15 @@ transaksi, constraint, dan locking.
 - Dihasilkan oleh satu exception filter global. Tidak ada controller yang merakit
   bentuk error sendiri.
 - `requestId` masuk ke setiap baris log, supaya keluhan user bisa dilacak ke log.
+
+> **Amandemen 2026-09-16 (review PRD-000, deviasi D-5).** Tipe TypeScript untuk bentuk
+> di atas dideklarasikan **satu kali di `packages/shared`**, bukan di `apps/api`.
+> Alasannya: begitu frontend bercabang berdasarkan `code`, bentuk ini jadi kontrak dua
+> sisi, dan kontrak dua sisi yang dideklarasikan dua kali akan berbeda cepat atau lambat.
+>
+> PRD-000 menaruhnya sementara di `apps/api/src/common/api-error.ts` karena web belum
+> mengonsumsinya — itu diterima untuk PRD-000 saja. **PRD-001 wajib memindahkannya ke
+> `@oddo/shared`**, karena layar login adalah konsumen pertamanya.
 
 ### B9. Logging → **pino**, terstruktur, JSON
 
