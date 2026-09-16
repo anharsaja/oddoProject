@@ -984,6 +984,24 @@ di root dibaca oleh api, web, dan Prisma CLI), `npm-run-all2` (`run-s`/`run-p`, 
 
 ---
 
+**Perbaikan setelah verifikasi ulang (fresh clone):**
+
+Verifikasi §13 langkah 16 diulang dari `node_modules` yang benar-benar dihapus, dan baru di
+situ ketahuan satu lubang: `pnpm install` saja tidak meng-generate Prisma client, sehingga
+`pnpm typecheck` gagal dengan `Module "@prisma/client" has no exported member
+'PrismaClient'` sebelum developer sempat menyentuh Docker. Verifikasi sebelumnya luput karena
+client-nya sudah ter-generate sejak awal sesi.
+
+Perbaikannya satu baris: `apps/api` mendapat script `postinstall: prisma generate`.
+`prisma generate` hanya membaca `schema.prisma` dan tidak menyentuh database, jadi aman
+dijalankan sebelum Docker menyala. Langkah di README tidak berubah.
+
+Dibuktikan ulang: `node_modules` dihapus total, `pnpm install --frozen-lockfile` menjalankan
+`prisma generate` otomatis, lalu `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm test`
+keempatnya exit 0 (30 test api + 6 test web).
+
+---
+
 **Cara menjalankan & menguji:**
 
 ```bash

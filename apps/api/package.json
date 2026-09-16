@@ -6,6 +6,7 @@
   "main": "dist/main.js",
   "scripts": {
     "dev": "run-s check:env dev:watch",
+    "postinstall": "prisma generate",
     "build": "nest build",
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
