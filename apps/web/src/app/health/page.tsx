@@ -3,10 +3,11 @@ import type { JSX } from 'react'
 import { HealthDashboard } from '@/components/health-dashboard'
 
 /**
- * Temporary landing page. PRD-000 §10: this moves to /health as soon as
- * PRD-001 introduces a real login screen, so no layout shell is built here.
+ * Public on purpose (PRD-001b §10): when Redis is down nobody can log in, and
+ * that is exactly the moment someone needs to see why. No header shell here —
+ * this page is reachable without an identity to put in one.
  */
-export default function HomePage(): JSX.Element {
+export default function HealthPage(): JSX.Element {
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-10">
       <HealthDashboard />
