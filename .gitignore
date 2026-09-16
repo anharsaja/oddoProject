@@ -13,6 +13,10 @@ next-env.d.ts
 
 # Test output
 coverage/
+test-results/
+playwright-report/
+blob-report/
+.next-e2e/
 
 # Environment — .env holds real secrets and is never committed.
 # .env.example and .env.test ARE committed on purpose (see PRD-000 §2.4).

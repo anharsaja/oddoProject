@@ -16,6 +16,10 @@ if (!apiUrl) {
 
 const nextConfig: NextConfig = {
   transpilePackages: ['@oddo/shared'],
+  // The E2E run starts a second dev server against the same project directory.
+  // Two Next processes sharing one .next would fight over it, so the E2E one is
+  // pointed somewhere else (PRD-001b §11 no. 9).
+  distDir: process.env['NEXT_DIST_DIR'] ?? '.next',
   // `pnpm lint` at the repository root is the single quality gate and already
   // covers this app. Letting `next build` start a second, separately configured
   // ESLint only produces a warning about a plugin the root config does not use.

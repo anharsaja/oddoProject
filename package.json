@@ -19,6 +19,8 @@
     "test": "run-s build:shared test:api test:web",
     "test:api": "pnpm --filter @oddo/api test",
     "test:web": "pnpm --filter @oddo/web test",
+    "test:e2e": "run-s build:shared build:api test:e2e:run",
+    "test:e2e:run": "pnpm --filter @oddo/web test:e2e",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "run-s build:shared typecheck:all",
     "typecheck:all": "run-p --continue-on-error typecheck:shared typecheck:api typecheck:web",
