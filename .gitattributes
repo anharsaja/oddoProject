@@ -1,0 +1,16 @@
+# Normalize line endings so the repo behaves the same on Windows and POSIX.
+* text=auto eol=lf
+
+# Shell scripts are executed inside Linux containers (Postgres init scripts).
+# CRLF would make them fail with "bad interpreter", so force LF.
+*.sh text eol=lf
+
+# Windows-only scripts keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary
+*.png binary
+*.jpg binary
+*.ico binary
