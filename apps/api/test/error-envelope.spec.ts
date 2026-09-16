@@ -4,6 +4,7 @@ import { ErrorCode } from '@oddo/shared'
 import { IsString } from 'class-validator'
 import request from 'supertest'
 
+import { Public } from '../src/common/decorators/public.decorator'
 import { AppModule } from '../src/app.module'
 import { configureApp } from '../src/app.setup'
 import { getEnv } from '../src/config/env'
@@ -17,10 +18,16 @@ class ProbeDto {
  * Exists only inside this test file (PRD-000 §15): the production API has no
  * endpoint that accepts a body yet, and adding one just to be validated would
  * be a feature nobody asked for.
+ *
+ * Marked @Public() since PRD-001b closed the API by default. This probe is here
+ * to exercise the ValidationPipe and the error envelope; without the marker it
+ * would answer 401 and stop testing either of them. The closed-by-default
+ * behaviour has its own probe, in auth-guard.spec.ts.
  */
 @Controller('validation-probe')
 class ValidationProbeController {
   @Post()
+  @Public()
   create(@Body() dto: ProbeDto): { received: string } {
     return { received: dto.name }
   }

@@ -8,7 +8,6 @@ import {
   Post,
   Req,
   Res,
-  UseGuards,
 } from '@nestjs/common'
 import type { Request, Response } from 'express'
 
@@ -17,7 +16,7 @@ import { Public } from '../../common/decorators/public.decorator'
 import type { RequestAuth } from '../../common/context/request-context'
 import { ENV } from '../../config/env.module'
 import type { Env } from '../../config/env.schema'
-import { AuthGuard, type RequestWithSession } from './auth.guard'
+import type { RequestWithSession } from './auth.guard'
 import { AuthService } from './auth.service'
 import { LoginDto } from './dto/login.dto'
 import { clearSessionCookie, readSessionCookie, setSessionCookie } from './session.cookie'
@@ -86,8 +85,9 @@ export class AuthController {
     clearSessionCookie(response, this.env)
   }
 
+  // No @UseGuards here: the global APP_GUARD already covers this route, and
+  // keeping both would run the guard — and its Redis round trip — twice.
   @Get('me')
-  @UseGuards(AuthGuard)
   async me(
     @CurrentUser() actor: RequestAuth,
     @Req() request: RequestWithSession,

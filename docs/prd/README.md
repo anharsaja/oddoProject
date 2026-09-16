@@ -27,7 +27,7 @@
 |---|---|---|---|---|---|---|
 | [PRD-000](PRD-000-project-scaffolding.md) | Project scaffolding | infra | P0 | — | `done` | 2026-09-16 |
 | [PRD-001a](PRD-001a-auth-login.md) | Auth: bisa login | core/auth | P0 | PRD-000 | `done` | 2026-09-16 |
-| [PRD-001b](PRD-001b-auth-enforcement.md) | Auth: tidak bisa dilewati | core/auth | P0 | PRD-001a | `ready` | 2026-09-16 |
+| [PRD-001b](PRD-001b-auth-enforcement.md) | Auth: tidak bisa dilewati | core/auth | P0 | PRD-001a | `in-progress` | 2026-09-16 |
 
 ### Rencana PRD berikutnya (belum ditulis)
 

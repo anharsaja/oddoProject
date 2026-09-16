@@ -1,7 +1,7 @@
 ---
 id: PRD-001b
 title: Auth — guard global, proteksi route di web, timing attack, dan E2E Playwright
-status: ready
+status: in-progress
 priority: P0
 modules: [core]
 depends_on: [PRD-001a]
