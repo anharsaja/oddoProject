@@ -1,7 +1,7 @@
 ---
 id: PRD-000
 title: Project scaffolding — monorepo, Docker, Prisma, health check
-status: review
+status: done
 priority: P0
 modules: [infra]
 depends_on: []
@@ -351,6 +351,13 @@ Endpoint health ditandai `@Public()` sejak sekarang.
     mengisi field `version` pada response. Ini membuktikan migrasi, seed, dan Prisma
     client bekerja, bukan sekadar koneksi TCP terbuka
   - redis — perintah `PING`, harus menjawab `PONG`
+- **Kalau baris `app.version` tidak ada** (migrasi jalan tapi seed belum): `database`
+  dilaporkan `down` dengan `error` yang menyebut baris mana yang hilang dan perintah
+  untuk memperbaikinya. Ini disengaja — pemeriksaan ini ada justru untuk membuktikan
+  rantai migrasi → seed → Prisma utuh, dan rantai yang putus di ujungnya tetap putus.
+  *(Diresmikan saat review, deviasi D-7)*
+- **Nilai `version` saat database `down`**: `"unknown"`. Versi hanya bisa dibaca dari
+  database, jadi tidak ada nilai lain yang jujur. *(Diresmikan saat review, deviasi D-6)*
 - **Timeout:** setiap pemeriksaan dibatasi 2 detik. Lewat dari itu dihitung `down`
   dengan `error: "timeout"` — health check tidak boleh ikut menggantung
 - **Errors:** tidak melempar exception. Kegagalan dependency dilaporkan di body dengan
@@ -757,23 +764,23 @@ Docker CLI, dan menghentikan container akan mengganggu test lain yang berjalan b
 
 ## 16. Definition of Done
 
-- [ ] Semua AC di bagian 14 lulus
-- [ ] Test unit + integration ditulis dan hijau (`pnpm test` exit 0)
-- [ ] Permission & record rule — **tidak berlaku di PRD ini**, tapi `@Public()`
+- [x] Semua AC di bagian 14 lulus
+- [x] Test unit + integration ditulis dan hijau (`pnpm test` exit 0)
+- [x] Permission & record rule — **tidak berlaku di PRD ini**, tapi `@Public()`
       sudah tersedia di `common/decorators/`
-- [ ] Audit log — **tidak berlaku di PRD ini**; logging terstruktur sudah jalan
+- [x] Audit log — **tidak berlaku di PRD ini**; logging terstruktur sudah jalan
       dan membawa `requestId`
-- [ ] Error state & validasi sesuai bagian 9 dan 11
-- [ ] `pnpm lint` (dengan `--max-warnings=0`) dan `pnpm typecheck` bersih
-- [ ] `README.md` berisi langkah setup dari nol dan sudah diuji ulang dari kondisi bersih,
+- [x] Error state & validasi sesuai bagian 9 dan 11
+- [x] `pnpm lint` (dengan `--max-warnings=0`) dan `pnpm typecheck` bersih
+- [x] `README.md` berisi langkah setup dari nol dan sudah diuji ulang dari kondisi bersih,
       termasuk catatan "kalau volume Postgres sudah ada tanpa `oddo_test`, jalankan
       `pnpm docker:down -v`"
-- [ ] `.env.example` dan `.env.test` lengkap dan cocok dengan skema validasi
-- [ ] Keluaran typecheck dari prosedur AC-000-07 (b) sudah ditempel di "Catatan Coder"
-- [ ] File migrasi Prisma di-commit
-- [ ] Bagian "Perintah penting" di `CLAUDE.md` diisi dengan script yang benar-benar ada
-- [ ] `docs/prd/README.md` diperbarui
-- [ ] Bagian "Catatan Coder" di bawah diisi
+- [x] `.env.example` dan `.env.test` lengkap dan cocok dengan skema validasi
+- [x] Keluaran typecheck dari prosedur AC-000-07 (b) sudah ditempel di "Catatan Coder"
+- [x] File migrasi Prisma di-commit
+- [x] Bagian "Perintah penting" di `CLAUDE.md` diisi dengan script yang benar-benar ada
+- [x] `docs/prd/README.md` diperbarui
+- [x] Bagian "Catatan Coder" di bawah diisi
 
 ---
 
@@ -1037,3 +1044,89 @@ docker compose start redis                       # pulih sendiri
 # hapus baris DATABASE_URL dari .env, lalu:
 pnpm --filter @oddo/api dev                      # exit 1 dalam ~2 detik
 ```
+
+---
+
+## Review Mentor — penutupan PRD-000 (2026-09-16)
+
+> Bagian ini ditulis sesi Mentor, bukan Coder. Isinya adalah keputusan resmi, bukan
+> komentar: apa pun di sini yang mengikat PRD berikutnya sudah dipindahkan ke ADR atau
+> ke `docs/PRODUCT-SCOPE.md` §4.1, supaya tidak tertinggal di dokumen yang sudah `done`.
+
+### Hasil verifikasi
+
+**12 dari 12 Acceptance Criteria lulus.** Mentor tidak hanya membaca tabel bukti Coder —
+lima perintah berikut dijalankan ulang dari repo ini, exit code diambil langsung:
+
+| Perintah | Exit code | Hasil |
+|---|---|---|
+| `pnpm install --frozen-lockfile` | 0 | Lockfile sinkron; `postinstall: prisma generate` ikut jalan |
+| `pnpm lint` | 0 | Nol temuan, dengan `--max-warnings=0` |
+| `pnpm typecheck` | 0 | `shared`, `api`, `web` bersih |
+| `pnpm test` | 0 | api `30 passed / 30 total`, web `6 passed (6)`, 0 skipped, 0 todo |
+| `pnpm build` | 0 | `Compiled successfully`, 4/4 halaman statis |
+
+Pembuktian ulang dua AC yang paling mudah lolos tanpa sengaja:
+
+- **AC-000-05** — API dinyalakan sungguhan, `curl /api/tidak-ada` → HTTP 404, dan key
+  body dibandingkan secara programatik:
+  `["code","details","message","requestId","statusCode","timestamp"]` — cocok persis,
+  `code = NOT_FOUND`.
+- **AC-000-08** — `pnpm db:seed` dijalankan dua kali (exit 0 dan 0), `count(*)`
+  `system_setting` diambil dari Postgres: 2 → 2 → 2. `app.initialized_at` tetap
+  menyimpan waktu seed pertama, jadi `update: {}` pada upsert memang bekerja.
+- **AC-000-12** — md5 seluruh isi `oddo_dev` identik sebelum dan sesudah `pnpm test`,
+  dan `pnpm test` dua kali berturut-turut sama-sama exit 0.
+
+AC yang **tidak** dijalankan ulang oleh Mentor, beserta alasannya: AC-000-01 dan
+AC-000-10 (b) menuntut volume Postgres dihapus, AC-000-03 (b) menuntut container Redis
+dimatikan. Ketiganya diterima atas bukti Coder plus pemeriksaan tidak langsung —
+kedua migrasi terbukti `applied` di `oddo_dev` **dan** `oddo_test`, CHECK constraint
+`system_setting_key_not_empty` ada di tabel sungguhan, dan `docker:up` memang memakai
+`--wait`. Untuk AC-000-03, bukti yang mengikat menurut PRD ini memang huruf (a), dan
+huruf (a) hijau.
+
+### Jawaban atas "Hal yang perlu diputuskan Mentor"
+
+| # | Pertanyaan Coder | Keputusan | Mendarat di |
+|---|---|---|---|
+| 1 | `ApiErrorResponse` pindah ke `@oddo/shared`? | **Ya, di PRD-001.** Begitu layar login bercabang berdasarkan `code`, ini jadi kontrak dua sisi — dan kontrak dua sisi yang dideklarasikan dua kali akan berbeda cepat atau lambat | Amandemen `ADR-0001` B8 + `PRODUCT-SCOPE` §4.1 butir 1 (In Scope PRD-001) |
+| 2 | Access log untuk path di luar `/api` | **Diterima apa adanya.** Seluruh permukaan aplikasi ada di `/api/**`; `/favicon.ico` tidak layak satu baris log. Tapi konsekuensinya diikat: route pertama di luar `/api` wajib memasang logger secara eksplisit | `ADR-0005` §5 |
+| 3 | `LOG_LEVEL` di `.env.test` | **Diubah jadi `warn`.** PRD-000 menetapkan `debug` dan itu keliru — Mentor mengalaminya sendiri saat verifikasi: ringkasan hasil test tenggelam di antara objek JSON per request | `ADR-0005` §4 + `PRODUCT-SCOPE` §4.1 butir 2 |
+| 4 | Prisma 7 menghapus `package.json#prisma` | **Ditunda**, dicatat sebagai utang teknis dengan pemicu yang jelas, bukan dibiarkan jadi warning yang lama-lama tak terbaca | `PRODUCT-SCOPE` §4.1, tabel utang teknis |
+| 5 | Zona `import/no-restricted-paths` antar modul | **Wajib PRD-002**, ditulis sebagai acceptance criteria tersendiri yang menuntut buktinya (satu import terlarang yang benar-benar membuat lint merah), bukan sekadar konfigurasi terpasang | `PRODUCT-SCOPE` §4.1 (teks AC-002-XX sudah jadi) + `ADR-0002` "Cara mengecek kepatuhan" |
+| 6 | Plugin ESLint React/Next | **PRD-001.** Dipasang sebelum jumlah halaman bertambah, bukan sesudah | `PRODUCT-SCOPE` §4.1 butir 5 |
+| 7 | E2E Playwright | **Tetap di PRD yang mengantarkan halaman login.** Kalau PRD-001 dipecah, ini ikut ke PRD-001b | `PRODUCT-SCOPE` §4.1 butir 6 |
+
+### Putusan atas deviasi Coder
+
+| # | Putusan | Alasan | Mendarat di |
+|---|---|---|---|
+| D-1 | **Setuju** | `NODE_ENV=test` bukan kosmetik — nilai itulah yang menentukan `pino-pretty` menyala. Lingkungan test yang menyebut dirinya `development` akan terus melahirkan beda perilaku tanpa pola. PRD-nya yang keliru, bukan Coder-nya | `ADR-0005` §4 |
+| D-2 | **Setuju** | `nest start --watch` memang tidak pernah exit; tanpa gerbang terpisah, AC-000-04 mustahil lolos. Ini akan terulang di setiap script watch berikutnya | `ADR-0005` §3 |
+| D-3 | **Setuju** | Alias eksplisit, tidak mengubah perilaku apa pun. Tidak perlu ADR | `README.md` + `CLAUDE.md` |
+| D-4 | **Setuju** | CHECK constraint tidak bisa diekspresikan di `schema.prisma`, dan menempelkannya ke migrasi yang sudah ter-apply akan merusak checksum-nya. Sudah dicakup `ADR-0001` B10 — tidak perlu ADR baru | `ADR-0001` B10 (sudah ada) |
+| D-5 | **Setuju untuk PRD-000, ditolak sebagai keadaan permanen** | Alasan Coder benar untuk PRD ini (web belum mengonsumsi bentuk error). Tapi membiarkannya berarti kontrak dua sisi punya dua deklarasi | Amandemen `ADR-0001` B8 + In Scope PRD-001 |
+| D-6 | **Setuju** | `version` hanya bisa dibaca dari database; saat database `down` tidak ada nilai lain yang jujur selain `"unknown"` | Spesifikasi §9 PRD ini diperbarui |
+| D-7 | **Setuju** | Justru sesuai maksud §11 no. 3. Health yang hanya `SELECT 1` akan melaporkan "sehat" padahal seed belum jalan — persis kegagalan yang ingin ditangkap | Spesifikasi §9 PRD ini diperbarui |
+
+Tidak ada deviasi yang ditolak sepenuhnya, dan tidak ada yang melanggar delapan aturan
+keras di `CLAUDE.md`.
+
+### Temuan Mentor yang tidak dilaporkan Coder
+
+| # | Temuan | Putusan | Mendarat di |
+|---|---|---|---|
+| F-1 | `updated_at` tidak punya `DEFAULT` di database, padahal §7.2 menetapkan `now()`. Penyebabnya `@updatedAt` yang diisi dari sisi aplikasi | **Diperbaiki sebagai konvensi**, bukan sebagai tambalan satu tabel. Akan direplikasi ke semua tabel PRD-002+, jadi lebih murah dibereskan sekarang | Amandemen `ADR-0002` §4 + retrofit di `PRODUCT-SCOPE` §4.1 butir 3 |
+| F-2 | `strictPropertyInitialization: false` di `apps/api/tsconfig.json`, tidak disebut di Catatan Coder yang menulis "TS strict penuh" | **Diterima** — wajar untuk DTO `class-validator` dan property injection — tapi dicatat resmi beserta kompensasinya (`name!: string`, bukan tipe opsional) | Amandemen `ADR-0001` B6 |
+| F-3 | Konstanta key `app.version` dideklarasikan dua kali (`health.service.ts` dan `prisma/seed/system.ts`). Kalau salah satu berubah, health melapor `database: down` tanpa ada yang rusak | **Disatukan di PRD-001** | `PRODUCT-SCOPE` §4.1 butir 4 |
+| F-4 | Bukti AC-000-08 di Catatan Coder menyebut `count(*)` **dan** md5 seluruh tabel identik. Md5-nya **tidak** stabil: tiap seed menulis ulang `app.version` sehingga `updated_at`-nya bergerak (diuji Mentor: `4c404485…` → `e7c1d35f…` → `1436021e…`) | **AC-nya tetap lulus** — yang disyaratkan jumlah baris, dan itu benar. Yang perlu dikoreksi hanya kalimat buktinya. Catatan Coder tidak disunting Mentor; koreksinya berdiri di sini | Bagian ini |
+
+### Status penutupan
+
+PRD-000 **`done`**. Yang diwariskan ke PRD berikutnya bukan catatan bebas, melainkan
+enam baris In Scope PRD-001 dan satu acceptance criteria PRD-002 di
+[`docs/PRODUCT-SCOPE.md`](../PRODUCT-SCOPE.md) §4.1, plus dua ADR baru:
+[`ADR-0004`](../adr/ADR-0004-composition-root-aplikasi.md) (composition root) dan
+[`ADR-0005`](../adr/ADR-0005-konfigurasi-environment-dan-lingkungan-test.md)
+(environment & lingkungan test).

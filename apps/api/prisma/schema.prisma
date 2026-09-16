@@ -29,7 +29,61 @@ model SystemSetting {
   value       Json     @db.JsonB
   description String?  @db.Text
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("system_setting")
+}
+
+/// A legal entity. Every business table hangs off one of these (ADR-0002 §2);
+/// `company` itself carries no company_id because it *is* the company.
+model Company {
+  id          String   @id @db.Uuid
+  name        String   @db.VarChar(200)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdById String?  @map("created_by") @db.Uuid
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedById String?  @map("updated_by") @db.Uuid
+
+  createdBy User?  @relation("CompanyCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy User?  @relation("CompanyUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  users     User[] @relation("UserCompany")
+
+  @@map("company")
+}
+
+/// Someone who can log in. `email` is the login identity and is unique across
+/// the whole instance, not per company (BR-AUTH-007): the login form has no
+/// company picker, so a duplicated email would make "who is logging in"
+/// ambiguous.
+///
+/// `created_by` and `updated_by` are nullable, unlike the general rule in
+/// ADR-0002 §4. NULL has exactly one documented meaning here: created by the
+/// system seed. The first administrator is created by nobody, and inventing a
+/// creator would be worse than recording the truth.
+model User {
+  id           String    @id @db.Uuid
+  companyId    String    @map("company_id") @db.Uuid
+  email        String    @unique @db.VarChar(255)
+  passwordHash String    @map("password_hash") @db.Text
+  name         String    @db.VarChar(200)
+  isSuperadmin Boolean   @default(false) @map("is_superadmin")
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdById  String?   @map("created_by") @db.Uuid
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedById  String?   @map("updated_by") @db.Uuid
+
+  company   Company @relation("UserCompany", fields: [companyId], references: [id], onDelete: Restrict)
+  createdBy User?   @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy User?   @relation("UserUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  createdUsers     User[]    @relation("UserCreatedBy")
+  updatedUsers     User[]    @relation("UserUpdatedBy")
+  createdCompanies Company[] @relation("CompanyCreatedBy")
+  updatedCompanies Company[] @relation("CompanyUpdatedBy")
+
+  @@index([companyId])
+  @@map("user")
 }

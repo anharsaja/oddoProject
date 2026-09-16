@@ -1,28 +1,13 @@
 import { ErrorCode } from '@oddo/shared'
 
-export interface ApiErrorDetail {
-  field: string
-  issue: string
-}
-
 /**
- * The single error envelope every endpoint returns (ADR-0001 B8).
- *
- * Kept in the API rather than in @oddo/shared because PRD-000 only asks
- * @oddo/shared for the health types and ErrorCode; the web app does not consume
- * this shape yet.
+ * The error *shape* lives in @oddo/shared because both applications need it.
+ * What stays here is the logic that maps HTTP status codes onto that shape —
+ * behaviour, not contract, and nothing in the web app has any use for it.
  */
-export interface ApiErrorResponse {
-  statusCode: number
-  code: ErrorCode
-  message: string
-  details: ApiErrorDetail[]
-  requestId: string
-  timestamp: string
-}
-
 const STATUS_TO_CODE: ReadonlyMap<number, ErrorCode> = new Map([
   [400, ErrorCode.VALIDATION_ERROR],
+  [401, ErrorCode.UNAUTHORIZED],
   [403, ErrorCode.FORBIDDEN],
   [404, ErrorCode.NOT_FOUND],
   [409, ErrorCode.STATE_CONFLICT],

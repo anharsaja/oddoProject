@@ -56,6 +56,18 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * The raw ioredis client, for callers that need pipelines or commands this
+   * service has no opinion about.
+   *
+   * Wrapping every Redis verb in a passthrough method would add a layer with no
+   * decisions in it; what belongs here is connection lifecycle, which is exactly
+   * what this class already owns.
+   */
+  get connection(): Redis {
+    return this.client
+  }
+
+  /**
    * Waits for the connection to actually finish instead of only asking it to.
    *
    * `disconnect()` returns while a connection attempt is still in flight, which

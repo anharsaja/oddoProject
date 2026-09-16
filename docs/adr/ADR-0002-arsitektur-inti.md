@@ -231,6 +231,16 @@ confirm(@Param('id') id: string, @CurrentCompany() companyId: string) { ... }
 | `updated_by` | UUID nullable | FK user |
 | `active` | boolean default true | **archive**, bukan delete |
 
+> **Amandemen 2026-09-16 (review PRD-000, temuan F-1).** `created_at` **dan** `updated_at`
+> wajib punya default di level database (`@default(now())` pada keduanya), bukan hanya
+> `@updatedAt`. `@updatedAt` diisi Prisma dari sisi aplikasi, sehingga kolomnya lahir
+> tanpa `DEFAULT` sama sekali — dan setiap `INSERT` yang tidak lewat Prisma (backfill,
+> migrasi data, perbaikan manual di production) gagal dengan pelanggaran NOT NULL.
+>
+> Bentuk yang benar: `updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(6)`.
+> Tabel `system_setting` dari PRD-000 belum memakainya; retrofit-nya masuk PRD-001
+> sebagai satu migrasi kecil.
+
 ### Apa yang dihitung sebagai "tabel bisnis"
 
 Aturan di atas berlaku untuk **tabel bisnis**: tabel yang dikelola user lewat layar,
@@ -377,7 +387,7 @@ kalau sesi harus dipotong.
 
 | Aturan | Cara mengecek |
 |---|---|
-| Arah dependency modul | ESLint `import/no-restricted-paths` + review struktur folder |
+| Arah dependency modul | ESLint `import/no-restricted-paths` + review struktur folder. **Status per 2026-09-16:** zona yang aktif baru `packages/** ✗→ apps/**` (ADR-0001 B1). Zona antar-modul (`core ✗→ inventory/sales`, `inventory ✗→ sales`) belum bisa dipasang karena foldernya belum ada — **wajib dipasang di PRD-002 sebagai acceptance criteria tersendiri**, lihat `docs/PRODUCT-SCOPE.md` §4.1 |
 | Tidak ada endpoint tanpa guard | Test yang memindai seluruh route saat boot dan gagal kalau ada yang tanpa metadata permission |
 | Isolasi company | Setiap PRD dengan endpoint list wajib punya test "company A tidak melihat data company B" |
 | Transisi atomic | Integration test yang memaksa efek samping gagal, lalu memastikan state tidak berubah |

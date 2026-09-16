@@ -1,8 +1,6 @@
 import { BadRequestException } from '@nestjs/common'
-import { ErrorCode } from '@oddo/shared'
+import { ErrorCode, type ApiErrorDetail } from '@oddo/shared'
 import type { ValidationError } from 'class-validator'
-
-import type { ApiErrorDetail } from '../api-error'
 
 /** Turns the nested class-validator tree into the flat `details` array of ADR-0001 B8. */
 export function flattenValidationErrors(

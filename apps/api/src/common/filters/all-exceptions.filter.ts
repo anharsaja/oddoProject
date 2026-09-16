@@ -6,14 +6,10 @@ import {
   type ArgumentsHost,
   type ExceptionFilter,
 } from '@nestjs/common'
+import type { ApiErrorDetail, ApiErrorResponse } from '@oddo/shared'
 import type { Request, Response } from 'express'
 
-import {
-  errorCodeForStatus,
-  isErrorCode,
-  type ApiErrorDetail,
-  type ApiErrorResponse,
-} from '../api-error'
+import { errorCodeForStatus, isErrorCode } from '../api-error'
 import { REQUEST_ID_HEADER, resolveRequestId } from '../request-id'
 
 type RequestWithId = Request & { id?: string }

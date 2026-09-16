@@ -7,6 +7,10 @@ const validEnv = {
   REDIS_URL: 'redis://localhost:6379/1',
   WEB_ORIGIN: 'http://localhost:3000',
   LOG_LEVEL: 'debug',
+  SESSION_IDLE_TTL_MINUTES: '120',
+  SESSION_ABSOLUTE_TTL_HOURS: '8',
+  ADMIN_EMAIL: 'admin@oddo.local',
+  ADMIN_PASSWORD: 'ChangeMe!2026',
 }
 
 describe('parseEnv', () => {
@@ -57,6 +61,38 @@ describe('parseEnv', () => {
 
   it('rejects a log level pino does not understand', () => {
     expect(() => parseEnv({ ...validEnv, LOG_LEVEL: 'verbose' })).toThrow(EnvValidationError)
+  })
+
+  it('lower-cases ADMIN_EMAIL so it matches the row the seed created', () => {
+    const env = parseEnv({ ...validEnv, ADMIN_EMAIL: 'Admin@Oddo.Local' })
+
+    expect(env.ADMIN_EMAIL).toBe('admin@oddo.local')
+  })
+
+  it('rejects an admin password shorter than 12 characters', () => {
+    expect(() => parseEnv({ ...validEnv, ADMIN_PASSWORD: 'short' })).toThrow(EnvValidationError)
+  })
+
+  it('rejects an absolute session limit that the idle window can never reach', () => {
+    try {
+      parseEnv({ ...validEnv, SESSION_IDLE_TTL_MINUTES: '120', SESSION_ABSOLUTE_TTL_HOURS: '1' })
+      throw new Error('parseEnv should have thrown')
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvValidationError)
+      const issues = (error as EnvValidationError).issues
+      // The report has to name both variables — one alone does not tell an
+      // operator what to change (AC-001a-11).
+      const report = issues.map((issue) => `${issue.variable}: ${issue.problem}`).join(' | ')
+      expect(report).toContain('SESSION_ABSOLUTE_TTL_HOURS')
+      expect(report).toContain('SESSION_IDLE_TTL_MINUTES')
+    }
+  })
+
+  it('accepts an absolute limit that is longer than the idle window', () => {
+    const env = parseEnv({ ...validEnv, SESSION_IDLE_TTL_MINUTES: '60', SESSION_ABSOLUTE_TTL_HOURS: '2' })
+
+    expect(env.SESSION_IDLE_TTL_MINUTES).toBe(60)
+    expect(env.SESSION_ABSOLUTE_TTL_HOURS).toBe(2)
   })
 
   it('reports every problem at once, not just the first', () => {

@@ -9,7 +9,7 @@ import { configureApp } from '../src/app.setup'
 import { PrismaService } from '../src/common/prisma/prisma.service'
 import { REQUEST_ID_HEADER } from '../src/common/request-id'
 import { getEnv } from '../src/config/env'
-import { APP_VERSION_KEY } from '../src/health/health.service'
+import { APP_VERSION_KEY } from '../src/common/system-setting.keys'
 
 describe('GET /api/health — every dependency alive', () => {
   let app: INestApplication

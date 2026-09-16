@@ -10,7 +10,7 @@ const config: Config = {
   },
   globalSetup: '<rootDir>/test/global-setup.ts',
   setupFiles: ['<rootDir>/test/setup-env.ts'],
-  setupFilesAfterEnv: ['<rootDir>/test/setup-db.ts'],
+  setupFilesAfterEnv: ['<rootDir>/test/setup-state.ts'],
   testTimeout: 30_000,
   clearMocks: true,
 }

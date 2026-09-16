@@ -9,11 +9,15 @@ export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', '
  * instead of naming it as missing. Validating the string first keeps the
  * message honest.
  */
-const port = z
-  .string()
-  .regex(/^[0-9]+$/, 'must be a whole number')
-  .transform(Number)
-  .refine((value) => value >= 1 && value <= 65535, 'must be between 1 and 65535')
+function integerBetween(min: number, max: number) {
+  return z
+    .string()
+    .regex(/^[0-9]+$/, 'must be a whole number')
+    .transform(Number)
+    .refine((value) => value >= min && value <= max, `must be between ${min} and ${max}`)
+}
+
+const port = integerBetween(1, 65535)
 
 /**
  * An origin for CORS, not merely any URL: 'localhost:3000' parses as a URL whose
@@ -27,6 +31,16 @@ const httpOrigin = z
     (value) => value.startsWith('http://') || value.startsWith('https://'),
     'must start with http:// or https://',
   )
+
+/**
+ * Lower-cased rather than rejected: BR-AUTH-007 stores every email in lower
+ * case anyway, so normalising here means an .env written with capitals still
+ * matches the row the seed created.
+ */
+const adminEmail = z
+  .string()
+  .email('must be an email address')
+  .transform((value) => value.toLowerCase())
 
 const postgresUrl = z
   .string()
@@ -58,7 +72,28 @@ export const envSchema = z.object({
   REDIS_URL: redisUrl,
   WEB_ORIGIN: httpOrigin,
   LOG_LEVEL: z.enum(LOG_LEVELS),
+
+  // PRD-001a §2.4 — session policy
+  SESSION_IDLE_TTL_MINUTES: integerBetween(5, 1440),
+  SESSION_ABSOLUTE_TTL_HOURS: integerBetween(1, 168),
+
+  // PRD-001a §2.4 — first administrator, created once by the system seed
+  ADMIN_EMAIL: adminEmail,
+  ADMIN_PASSWORD: z.string().min(12, 'must be at least 12 characters'),
 })
+  /**
+   * A sliding window that is allowed to outlive its own ceiling is not a
+   * policy, it is a bug waiting to be discovered in production. Caught here,
+   * at boot, rather than by a session that never expires.
+   */
+  .refine(
+    (env) => env.SESSION_ABSOLUTE_TTL_HOURS * 60 > env.SESSION_IDLE_TTL_MINUTES,
+    {
+      path: ['SESSION_ABSOLUTE_TTL_HOURS'],
+      message:
+        'must be longer than SESSION_IDLE_TTL_MINUTES — an absolute limit below the idle window can never be reached',
+    },
+  )
 
 export type Env = z.infer<typeof envSchema>
 

@@ -58,6 +58,22 @@ for Database and Redis, both of which should read **up**.
 
 The API itself is at <http://localhost:3001/api/health>.
 
+### Logging in
+
+`pnpm db:seed` creates one company and one administrator, taken from `.env`:
+
+| Variable | Default in `.env.example` |
+|---|---|
+| `ADMIN_EMAIL` | `admin@oddo.local` |
+| `ADMIN_PASSWORD` | `ChangeMe!2026` |
+
+Sign in at <http://localhost:3000/login>.
+
+The seed is **create-only**: once that account exists, changing `ADMIN_PASSWORD`
+and re-seeding does not touch it. That is deliberate — otherwise every seed would
+undo a password someone had changed on purpose. To reset it today, update the row
+in the database.
+
 ---
 
 ## 3. Commands

@@ -3,15 +3,13 @@ import type { HealthCheckResult, HealthResponse } from '@oddo/shared'
 import type { Prisma } from '@prisma/client'
 
 import { PrismaService } from '../common/prisma/prisma.service'
+import { APP_VERSION_KEY } from '../common/system-setting.keys'
 import { RedisService } from '../common/redis/redis.service'
 import { describeError, withTimeout } from '../common/with-timeout'
 import { resolveOverallStatus } from './health.status'
 
 /** Hard ceiling per dependency probe (PRD-000 §9). */
 const CHECK_TIMEOUT_MS = 2_000
-
-/** Row that carries the application version; also proves migrate + seed ran. */
-export const APP_VERSION_KEY = 'app.version'
 
 const UNKNOWN_VERSION = 'unknown'
 
