@@ -1,6 +1,8 @@
 import { ErrorCode, type ApiErrorResponse } from '@oddo/shared'
 
 import { API_URL } from './config'
+import { browserNavigation } from './navigation'
+import { resolveNextPath } from './safe-next'
 
 /**
  * An error the API answered with. Carries the stable `code` for branching and
@@ -28,6 +30,24 @@ export class ApiUnreachableError extends Error {
     this.name = 'ApiUnreachableError'
     this.url = url
   }
+}
+
+/**
+ * A 401 from anywhere other than the login form means the session is gone —
+ * expired, revoked, or past its absolute ceiling — and the only useful place to
+ * send someone is the login page, with where they were so they can be returned
+ * there afterwards.
+ *
+ * The login page is excluded because a 401 there means 'wrong password', and
+ * redirecting would replace the explanation with the same form again.
+ */
+function redirectToLogin(): void {
+  if (typeof window === 'undefined' || browserNavigation.isOnLoginPage()) {
+    return
+  }
+
+  const next = resolveNextPath(browserNavigation.currentPath())
+  browserNavigation.assign(`/login?next=${encodeURIComponent(next)}`)
 }
 
 function readErrorBody(body: unknown, statusCode: number): ApiError {
@@ -62,6 +82,10 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     })
   } catch {
     throw new ApiUnreachableError(API_URL)
+  }
+
+  if (response.status === 401) {
+    redirectToLogin()
   }
 
   if (!response.ok) {
