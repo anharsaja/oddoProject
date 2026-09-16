@@ -1,4 +1,5 @@
 import { ValidationPipe, type INestApplication } from '@nestjs/common'
+import cookieParser from 'cookie-parser'
 
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter'
 import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor'
@@ -14,6 +15,10 @@ import type { Env } from './config/env.schema'
  */
 export function configureApp(app: INestApplication, env: Env): void {
   app.setGlobalPrefix('api')
+
+  // The session id arrives as a cookie, so something has to parse it before any
+  // guard can look. No dependencies to inject, so channel 1 (ADR-0004).
+  app.use(cookieParser())
 
   app.useGlobalPipes(
     new ValidationPipe({

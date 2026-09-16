@@ -6,6 +6,7 @@ import { PrismaModule } from './common/prisma/prisma.module'
 import { RedisModule } from './common/redis/redis.module'
 import { ENV, EnvModule } from './config/env.module'
 import type { Env } from './config/env.schema'
+import { AuthModule } from './core/auth/auth.module'
 import { HealthModule } from './health/health.module'
 
 @Module({
@@ -17,6 +18,7 @@ import { HealthModule } from './health/health.module'
     }),
     PrismaModule,
     RedisModule,
+    AuthModule,
     HealthModule,
   ],
 })
