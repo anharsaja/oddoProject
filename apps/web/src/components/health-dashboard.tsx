@@ -52,28 +52,52 @@ function LoadingState(): JSX.Element {
   )
 }
 
+/**
+ * Asks the API how it is, and reports the state that answer implies.
+ *
+ * Returns the next state instead of setting it, so the caller decides when a
+ * render happens. A 503 still carries a full health body, so only a transport
+ * failure counts as "unreachable" — a degraded system must keep showing which
+ * dependency is the one that is down.
+ */
+async function probeHealth(): Promise<ViewState> {
+  try {
+    const response = await fetch(`${API_URL}/health`, { cache: 'no-store' })
+    const health = (await response.json()) as HealthResponse
+    return { kind: 'loaded', health }
+  } catch {
+    return { kind: 'unreachable' }
+  }
+}
+
 export function HealthDashboard(): JSX.Element {
   const [state, setState] = useState<ViewState>({ kind: 'loading' })
 
   /**
-   * A 503 still carries a full health body, so only a transport failure counts
-   * as "unreachable" — a degraded system must keep showing which dependency is
-   * the one that is down.
+   * Resetting to the loading state belongs here, not to the probe: on mount the
+   * state is already 'loading', and doing it there would be a synchronous
+   * setState inside an effect — an extra render that changes nothing.
    */
-  const load = useCallback(async (): Promise<void> => {
+  const refresh = useCallback((): void => {
     setState({ kind: 'loading' })
-    try {
-      const response = await fetch(`${API_URL}/health`, { cache: 'no-store' })
-      const health = (await response.json()) as HealthResponse
-      setState({ kind: 'loaded', health })
-    } catch {
-      setState({ kind: 'unreachable' })
-    }
+    void probeHealth().then(setState)
   }, [])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    let cancelled = false
+
+    async function loadOnMount(): Promise<void> {
+      const next = await probeHealth()
+      if (!cancelled) {
+        setState(next)
+      }
+    }
+
+    void loadOnMount()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   return (
     <div className="space-y-6">
@@ -95,7 +119,7 @@ export function HealthDashboard(): JSX.Element {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button onClick={() => void load()}>Coba lagi</Button>
+            <Button onClick={refresh}>Coba lagi</Button>
           </CardContent>
         </Card>
       ) : null}
@@ -107,7 +131,7 @@ export function HealthDashboard(): JSX.Element {
             <DependencyCard label="Redis" result={state.health.checks.redis} />
           </div>
           <div className="flex items-center gap-3">
-            <Button variant="outline" onClick={() => void load()}>
+            <Button variant="outline" onClick={refresh}>
               Muat ulang
             </Button>
             <span className="text-sm text-muted-foreground">

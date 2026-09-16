@@ -6,6 +6,7 @@ import {
   browserEnv,
   nodeEnv,
   noConsoleInAppCode,
+  reactAndNext,
   workspaceBoundaries,
 } from '@oddo/config/eslint'
 
@@ -21,5 +22,6 @@ export default [
   workspaceBoundaries(rootDir),
   { files: ['apps/api/**/*.ts', 'packages/**/*.ts'], ...nodeEnv },
   { files: ['apps/web/**/*.{ts,tsx}'], ...browserEnv },
+  ...reactAndNext(['apps/web/**/*.{ts,tsx}']),
   noConsoleInAppCode,
 ]

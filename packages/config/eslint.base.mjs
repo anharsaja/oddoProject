@@ -1,8 +1,10 @@
 import path from 'node:path'
 
+import nextPlugin from '@next/eslint-plugin-next'
 import js from '@eslint/js'
 import prettier from 'eslint-config-prettier'
 import importPlugin from 'eslint-plugin-import'
+import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
@@ -11,6 +13,9 @@ export const ignores = [
   '**/node_modules/**',
   '**/dist/**',
   '**/.next/**',
+  '**/.next-e2e/**',
+  '**/playwright-report/**',
+  '**/test-results/**',
   '**/coverage/**',
   '**/*.tsbuildinfo',
   '**/next-env.d.ts',
@@ -54,6 +59,32 @@ export const nodeEnv = {
   languageOptions: {
     globals: { ...globals.node },
   },
+}
+
+/**
+ * React and Next rules, scoped to the files that are actually a Next app.
+ *
+ * The hooks rules are the point: a dependency array that lies produces a stale
+ * closure, which shows up much later as 'the screen did not update' and is
+ * miserable to trace back. A linter catches it at the line that caused it.
+ *
+ * @param {string[]} files glob patterns the Next.js application lives in
+ */
+export function reactAndNext(files) {
+  return [
+    // configs.flat, not configs: the top-level export is still the legacy shape
+    // whose `plugins` is an array of strings, which flat config rejects.
+    { files, ...reactHooks.configs.flat['recommended-latest'] },
+    { files, ...nextPlugin.configs['core-web-vitals'] },
+    {
+      files,
+      rules: {
+        // Pages Router only. This app is App Router, so the rule can never find
+        // the directory it looks for and prints a notice on every lint run.
+        '@next/next/no-html-link-for-pages': 'off',
+      },
+    },
+  ]
 }
 
 /** Config fragment for code that runs in the browser (the Next.js app). */
