@@ -137,6 +137,7 @@ gagal EPERM di Windows).
 | Dev server | `pnpm dev` (api :3001, web :3000) |
 | Build | `pnpm build` |
 | Test | `pnpm test` (butuh Docker jalan; memakai database `oddo_test`) |
+| E2E | `pnpm test:e2e` (Playwright di Chrome yang terpasang; **jangan** bersamaan dengan `pnpm test` — keduanya memakai `oddo_test`) |
 | Lint | `pnpm lint` (`--max-warnings=0`) |
 | Typecheck | `pnpm typecheck` |
 | Format | `pnpm format` / `pnpm format:check` |

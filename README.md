@@ -15,6 +15,7 @@ NestJS backend, a Next.js frontend, and PostgreSQL + Redis running in Docker.
 | Node.js | 20 or newer | |
 | Docker Desktop | any current | must be **running** before `pnpm docker:up` |
 | pnpm | 9.15.4 | installed through corepack, see below |
+| Google Chrome | any recent | only for `pnpm test:e2e`; see §5 |
 
 pnpm is pinned by the `packageManager` field in `package.json`, so it is enabled
 rather than installed:
@@ -83,6 +84,7 @@ in the database.
 | `pnpm dev` | Runs API and web together. Fails immediately if `.env` is incomplete |
 | `pnpm build` | Builds every package in the workspace |
 | `pnpm test` | Unit + integration tests. Needs Docker running; uses `oddo_test` |
+| `pnpm test:e2e` | Playwright, in a real browser. Needs Docker and Chrome; uses `oddo_test` |
 | `pnpm lint` | ESLint over the whole workspace, warnings treated as errors |
 | `pnpm typecheck` | `tsc --noEmit` for every package |
 | `pnpm format` | Prettier write (`pnpm format:check` to only verify) |
@@ -124,7 +126,46 @@ The Postgres container serves two databases: `oddo_dev` for development and
 
 ---
 
-## 5. Troubleshooting
+## 5. End-to-end tests
+
+```bash
+pnpm docker:up      # if it is not already running
+pnpm test:e2e
+```
+
+Playwright drives **the Google Chrome already installed on this machine** rather
+than downloading its own browser (ADR-0005 §6). Chrome is therefore a
+prerequisite; without it the run fails with:
+
+```
+Error: Chromium distribution 'chrome' is not found at ...
+Run "npx playwright install chrome"
+```
+
+Nothing here downloads a browser, and `pnpm install` does not either — Playwright
+1.63 ships no install hook, which was verified rather than assumed. Should a
+future version bring one back, set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` before
+installing.
+
+To use a different browser, set `PLAYWRIGHT_CHANNEL` — no file needs editing:
+
+| Value | Browser used |
+|---|---|
+| unset | `chrome`, the installed Chrome (default) |
+| empty (`PLAYWRIGHT_CHANNEL=`) | Playwright's bundled Chromium — for CI |
+| anything else, e.g. `msedge` | that channel |
+
+The suite starts its **own** servers on ports **3100** (web) and **3101** (api),
+so it can run while `pnpm dev` is up on 3000/3001. It uses `oddo_test`, never
+`oddo_dev`.
+
+> **Do not run `pnpm test` and `pnpm test:e2e` at the same time.** Both use
+> `oddo_test`, and the Jest suite truncates every table before each test file —
+> it would empty the database out from under the browser.
+
+---
+
+## 6. Troubleshooting
 
 **`pnpm db:migrate` cannot connect / `oddo_test` does not exist**
 

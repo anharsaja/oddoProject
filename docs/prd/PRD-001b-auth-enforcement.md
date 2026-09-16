@@ -1,7 +1,7 @@
 ---
 id: PRD-001b
 title: Auth — guard global, proteksi route di web, timing attack, dan E2E Playwright
-status: in-progress
+status: review
 priority: P0
 modules: [core]
 depends_on: [PRD-001a]
@@ -801,12 +801,221 @@ keduanya memakai database yang sama dan Jest mem-`TRUNCATE` di awal tiap file.
 
 **Ringkasan yang dikerjakan:**
 
+Seluruh bagian 13 (langkah 1–16) dikerjakan. Aplikasi sekarang tertutup dari dua sisi:
+`AuthGuard` naik jadi `APP_GUARD` sehingga setiap endpoint tertutup kecuali yang bertanda
+`@Public()`, dan `apps/web` mengalihkan pengunjung tanpa cookie sebelum apa pun dirender.
+Halaman health pindah ke `/health` dan tetap publik, `/` jadi home terproteksi dengan
+header shell, timing attack pada login ditutup, dan seluruh alur dibuktikan Playwright di
+Chrome sungguhan.
+
+Lima hal yang perlu diketahui Mentor:
+
+1. **Guard global membuat satu test PRD-000 gagal — dan itu bukti mekanismenya bekerja.**
+   Controller probe di `error-envelope.spec.ts` tidak bertanda apa pun, jadi ia langsung
+   tertutup dan menjawab 401. Probe itu ada untuk menguji `ValidationPipe`, bukan auth,
+   jadi ia diberi `@Public()`. Perilaku tertutup-secara-bawaan punya probe sendiri di
+   `auth-guard.spec.ts` — satu controller yang memang sengaja tidak ditandai apa pun.
+2. **Middleware bukan batas keamanan, dan itu ditulis di kodenya.** Ia berjalan di Edge,
+   tidak punya akses Redis, dan hanya melihat ada-tidaknya cookie. Satu-satunya batas
+   keamanan adalah guard global — yang tidak pernah dilewati request halaman sama sekali.
+3. **`apiFetch` mengalihkan 401 ke `/login`, kecuali dua hal.** Kecuali saat sudah berada
+   di `/login` (di sana 401 berarti "password salah", dan mengalihkan akan mengganti
+   penjelasannya dengan form yang sama), dan kecuali status selain 401 (500 adalah
+   gangguan, bukan session habis).
+4. **Probe kesiapan Playwright untuk API bukan `/api/health`.** Playwright menyalakan
+   `webServer` **sebelum** `globalSetup`, jadi saat probe berjalan `oddo_test` masih
+   kosong dan `/api/health` menjawab 503 selamanya — menunggu seed yang justru baru akan
+   dijalankan `globalSetup`. Detailnya di deviasi D-1.
+5. **Plugin react-hooks v7 menemukan satu masalah nyata**, bukan sekadar terpasang: fetch
+   di `HealthDashboard` memanggil `setState` sinkron di dalam effect. Diperbaiki dengan
+   memisahkan "ambil data" dari "ubah state" — lihat deviasi D-3.
+
+---
+
 **File yang dibuat/diubah:**
+
+*API tertutup (bagian A)*
+
+| Path | Perubahan |
+|---|---|
+| `apps/api/src/core/auth/auth.guard.ts` | Membaca `@Public()` lewat `Reflector.getAllAndOverride` (handler lalu class); mencatat penolakan di level `debug` |
+| `apps/api/src/core/auth/auth.module.ts` | `{ provide: APP_GUARD, useClass: AuthGuard }` — Kanal 2 `ADR-0004` |
+| `apps/api/src/core/auth/auth.controller.ts` | `@UseGuards(AuthGuard)` lokal di `/me` dihapus; guard global sudah mencakupnya |
+| `apps/api/src/core/auth/password.service.ts` | `DUMMY_PASSWORD_HASH` + `verifyDummy()` |
+| `apps/api/src/core/auth/auth.service.ts` | Jalur "email tidak ada" dan "user nonaktif" memanggil `verifyDummy()`; ketiga kegagalan keluar lewat satu method `rejectLogin()` |
+| `apps/api/test/auth-guard.spec.ts` | **baru** — tertutup secara bawaan + endpoint publik (7 test) |
+| `apps/api/test/auth-timing.spec.ts` | **baru** — spy argon2 + perbandingan median (3 test) |
+| `apps/api/test/error-envelope.spec.ts` | Probe validasi diberi `@Public()` |
+| `apps/api/src/core/auth/password.service.spec.ts` | Dummy memakai parameter argon2 yang sama dengan `hash()` (2 test) |
+
+*Web (bagian B)*
+
+| Path | Peran |
+|---|---|
+| `apps/web/src/lib/safe-next.ts` | **baru** — `resolveNextPath()`, pagar BR-AUTH-011 |
+| `apps/web/src/middleware.ts` | **baru** — UX guard: tanpa cookie → `/login?next=`, dengan cookie di `/login` → `/` |
+| `apps/web/src/lib/navigation.ts` | **baru** — satu-satunya tempat aplikasi menyentuh `window.location`; ada supaya redirect bisa diuji |
+| `apps/web/src/lib/api-client.ts` | 401 → `/login?next=<path aman>`, dengan dua pengecualian di atas |
+| `apps/web/src/app/health/page.tsx` | **pindah** dari `src/app/page.tsx`, apa adanya |
+| `apps/web/src/app/page.tsx` | **ditulis ulang** — home terproteksi: skeleton → konten / redirect / pesan gangguan |
+| `apps/web/src/components/app-header.tsx` | **baru** — header shell, skeleton saat identitas belum datang, tombol `Keluar` |
+| `apps/web/src/app/login/page.tsx` | Membaca `?next=` lewat `resolveNextPath()`, dibungkus `Suspense` |
+| `apps/web/src/components/health-dashboard.tsx` | Fetch dipisah jadi `probeHealth()` yang mengembalikan state (lihat D-3) |
+| `apps/web/test/safe-next.test.ts` | **baru** — 9 test |
+| `apps/web/test/api-client.test.ts` | **baru** — 8 test |
+| `apps/web/test/app-header.test.tsx` | **baru** — 4 test |
+| `apps/web/test/home-page.test.tsx` | **baru** — 5 test |
+| `apps/web/test/login-page.test.tsx` | Mock `useSearchParams`, tabel AC-001b-05 (13 test) |
+
+*E2E dan pagar (bagian C)*
+
+| Path | Peran |
+|---|---|
+| `apps/web/playwright.config.ts` | **baru** — dua `webServer` (3101 api, 3100 web), `reuseExistingServer: false`, satu project `chrome` |
+| `apps/web/e2e/playwright-channel.ts` | **baru** — `resolvePlaywrightChannel()` |
+| `apps/web/e2e/global-setup.ts` | **baru** — `migrate deploy` + seed ke `oddo_test` |
+| `apps/web/e2e/auth.spec.ts` | **baru** — satu test menempuh seluruh alur AC-001b-10 |
+| `apps/web/test/playwright-channel.test.ts` | **baru** — tiga cabang channel (3 test) |
+| `apps/web/next.config.ts` | `distDir` dari `NEXT_DIST_DIR` supaya dev dan E2E tidak berebut `.next` |
+| `apps/web/tsconfig.json` | `.next-e2e/types` didaftarkan di depan supaya `next dev` berhenti menulis ulang file ini |
+| `packages/config/eslint.base.mjs` | Plugin `react-hooks` + `@next/next`; keluaran build masuk daftar ignore |
+| `eslint.config.mjs` | Memasang `reactAndNext()` khusus file `apps/web` |
+| `package.json`, `apps/web/package.json` | Script `test:e2e` |
+| `CLAUDE.md`, `README.md` | Baris E2E, prasyarat Chrome, `PLAYWRIGHT_CHANNEL`, peringatan §11 no. 11 |
+| `.gitignore` | `test-results/`, `playwright-report/`, `.next-e2e/` |
+
+---
 
 **Bukti Acceptance Criteria:**
 
-**Deviasi dari PRD (kalau ada) + alasannya:**
+| AC | Terpenuhi? | Bukti |
+|---|---|---|
+| AC-001b-01 Tertutup secara bawaan | ya | `auth-guard.spec.ts`: `/api/auth/me` tanpa cookie → 401 dengan enam field envelope; `UnmarkedProbeController` — controller tanpa penanda apa pun — juga 401; dan dengan cookie keduanya 200 |
+| AC-001b-02 Publik tetap terbuka | ya | `auth-guard.spec.ts`: health 200, login 200 dan 401 sesuai kredensial, logout 204, semuanya tanpa cookie. Route tak dikenal tetap 404 (bukan 401) |
+| AC-001b-03 Timing attack | ya | (a) `auth-timing.spec.ts` men-spy `PasswordService.verify`: untuk email asing **dan** untuk user nonaktif, verify terpanggil tepat sekali dan argumennya `DUMMY_PASSWORD_HASH`. (b) 5+5 request bergantian; median jalur "email asing" ≥ 50% median jalur "password salah" |
+| AC-001b-04 Middleware mengalihkan | ya | E2E langkah 1: `/` tanpa cookie mendarat di `/login?next=%2F`. Manual: `curl -D - http://localhost:3000/` → `307` + `location: /login?next=%2F` |
+| AC-001b-05 Parameter next | ya | `login-page.test.tsx` menjalankan ketujuh baris tabel AC sebagai `it.each`, dan tiap kasus juga memastikan **tidak ada** `role="alert"` yang muncul. `safe-next.test.ts` menutup fungsinya sendiri (9 test) |
+| AC-001b-06 Cookie hidup, session mati | ya | `home-page.test.tsx` "goes to the login page after a 401, without ever showing content": loading state terlihat lebih dulu, lalu `router.replace('/login?next=%2F')`, dan konten home maupun pesan gangguan tidak pernah muncul |
+| AC-001b-07 Health publik | ya | Manual: `curl -D - http://localhost:3000/health` tanpa cookie → `200`, tanpa `location`. E2E langkah 3 membuka `/health`, melihat kartu Database, dan memastikan tombol `Keluar` **tidak** ada di sana |
+| AC-001b-08 Logout lewat layar | ya | E2E langkah 4: tombol `Keluar` → mendarat di `/login`; langkah 5 membuka `/` lagi dan ditolak. `app-header.test.tsx` memastikan `POST /auth/logout` benar-benar dikirim dengan `credentials: include` |
+| AC-001b-09 Sudah login buka /login | ya | Manual: `curl -D - -b "oddo_session=<sid asli>" http://localhost:3000/login` → `307` + `location: /` (tanpa cookie: `200`) |
+| AC-001b-10 E2E alur sungguhan | ya | `pnpm test:e2e` exit 0, `1 passed`, project `[chrome]`. Satu test menempuh lima langkah berurutan persis seperti AC |
+| AC-001b-11 E2E tidak menyentuh dev | ya | `pnpm dev` dinyalakan lebih dulu, lalu hash `oddo_dev` diambil: `2/1/1 \| af5ad330eda6c7525f6dd7f899a5692a`. Selama E2E berjalan, **keempat** port 3000, 3001, 3100, 3101 terpantau LISTENING bersamaan. Sesudah E2E hijau, hash diambil lagi: **identik** |
+| AC-001b-12 Konfigurasi Playwright | ya | `reuseExistingServer: false` muncul 2 kali (satu per entri), port 3100/3101, `projects` berisi tepat satu entri bernama `chrome`, `channel` ditulis sesudah spread `devices['Desktop Chrome']`, dan pencarian `firefox`/`webkit` di seluruh file: 0 |
+| AC-001b-13 Redis mati ≠ ter-logout | ya | `home-page.test.tsx` "reports an outage instead of sending the user to log in again": 500 memunculkan "Sistem sedang terganggu" dan `router.replace` **tidak** dipanggil. Di sisi API, `auth-redis-down.spec.ts` (PRD-001a) tetap hijau: `/me` dengan Redis mati menjawab 500, bukan 401 |
+| AC-001b-14 Pagar kualitas | ya | `pnpm lint`, `typecheck`, `test`, `build`, `test:e2e` kelimanya exit 0. **84 test API** (15 suite) + **48 test web** (7 file) + 1 E2E. 0 skipped, 0 todo, 0 `eslint-disable` di seluruh repo. Bukti plugin benar-benar berjalan ada di bawah |
+| AC-001b-15 Channel bisa diganti | ya | (a) `playwright-channel.test.ts` menguji ketiga cabang lewat fungsinya, tanpa menjalankan browser. (b) bukti unduhan ada di bawah |
+
+**Bukti AC-001b-14 — plugin baru benar-benar menjalankan aturannya.**
+Dua pelanggaran disisipkan sementara di `apps/web/src/app/page.tsx` (hook dipanggil di
+dalam `if`, dan sebuah `<img>` mentah):
+
+```
+=== lint WITH violations ===
+      1 @next/next/no-img-element
+      1 react-hooks/purity
+      1 react-hooks/rules-of-hooks
+lint exit=1
+
+=== lint after removing them ===
+lint exit=0
+```
+
+**Bukti AC-001b-15 (b) — `pnpm install` tidak mengunduh browser.**
+Diverifikasi, bukan diasumsikan: `playwright@1.63.0` ternyata **tidak punya install script
+sama sekali** (`scripts: undefined` di `package.json`-nya), jadi tidak ada mekanisme yang
+perlu dimatikan.
+
+```
+cache BEFORE : 436M   [chromium-1243, ffmpeg-1011]
+node_modules dihapus total
+pnpm install --frozen-lockfile  -> exit 0
+baris "Downloading Chromium/Firefox/WebKit" : 0
+satu-satunya postinstall yang jalan          : apps/api -> prisma generate
+cache AFTER  : 436M   [chromium-1243, ffmpeg-1011]   (diff vs BEFORE: identik)
+```
+
+Isi cache itu sisa dari unduhan yang **dibatalkan** sebelum keputusan `channel: 'chrome'`
+diambil; ia tidak dipakai E2E dan aman dihapus.
+
+---
+
+**Deviasi dari PRD + alasannya:**
+
+| # | Deviasi | Alasan | Dampak |
+|---|---|---|---|
+| D-1 | Probe kesiapan `webServer` API memakai `/api/auth/me`, bukan `/api/health` | Playwright menyalakan `webServer` **sebelum** `globalSetup` — terbukti: run pertama gagal `Timed out waiting 120000ms` dengan port 3101 hidup tapi 3100 tidak pernah menyala. Saat probe berjalan `oddo_test` masih kosong, jadi `/api/health` menjawab 503 karena baris seed belum ada — padahal seed itulah yang baru akan dijalankan `globalSetup`. Kebuntuan melingkar. `/api/auth/me` menjawab 401, yang Playwright terima sebagai "siap", dan 401 di situ justru membuktikan lebih banyak: proses boot, Nest me-routing, guard jalan | Seed tetap di `globalSetup` persis seperti §13. Kalau Mentor lebih suka health sebagai probe, seed harus pindah ke luar `globalSetup` |
+| D-2 | Matcher middleware hanya mengecualikan aset statis; `/health` dan `/login` dibandingkan **persis** di kode | §13 langkah 8 menyebut matcher mengecualikan `/health`. Di matcher, pengecualian itu berbasis awalan, sehingga `/healthz` atau `/health-internal` ikut kebal tanpa ada yang sadar. Perbandingan persis tidak punya lubang itu | Perilaku untuk `/health` identik; dibuktikan manual (`200`, tanpa redirect) dan oleh E2E |
+| D-3 | `HealthDashboard` ditulis ulang: `probeHealth()` mengembalikan state, pemanggilnya yang memanggil `setState` | Bukan inisiatif sendiri — `react-hooks/set-state-in-effect` (plugin yang §13 langkah 16 suruh pasang) menolak `setState` sinkron di dalam effect. Kode lama memang menyetel `{kind:'loading'}` di awal `load()`, padahal saat mount state-nya sudah `loading`: satu render tambahan yang tidak mengubah apa pun | 6 test `health-dashboard.test.tsx` tetap hijau tanpa disunting. Tombol "Coba lagi" dan "Muat ulang" kini memakai `refresh` |
+| D-4 | `@next/next/no-html-link-for-pages` dimatikan di config bersama | Aturan itu khusus Pages Router; aplikasi ini App Router, sehingga ia mencetak "Pages directory cannot be found" di **setiap** kali lint dijalankan. Dimatikan lewat config, **bukan** komentar `eslint-disable` — larangan AC-001b-14 tetap utuh | Tidak ada; aturan itu tidak bisa berlaku di App Router |
+| D-5 | `next.config.ts` mendapat `distDir` dari `NEXT_DIST_DIR`, dan `tsconfig.json` mendaftarkan `.next-e2e/types` | §11 no. 9 mensyaratkan `pnpm dev` dan `pnpm test:e2e` hidup berdampingan. Dua proses `next dev` yang berbagi satu `.next` akan berebut direktori itu. Tanpa entri di `tsconfig.json`, `next dev` milik E2E **menulis ulang** file itu sendiri di tengah run — termasuk memformat ulang seluruh isinya | Terbukti: keempat port hidup bersamaan dan `oddo_dev` tidak berubah |
+
+**Tidak ada TODO, mock, atau stub yang tersisa.**
+
+**Dependency yang ditambahkan:** `@playwright/test` (§13), `eslint-plugin-react-hooks` dan
+`@next/eslint-plugin-next` (`PRODUCT-SCOPE` §4.1 butir 5).
+
+---
 
 **Hal yang perlu diputuskan Mentor untuk PRD berikutnya:**
 
+1. **Nama cookie `oddo_session` sekarang tertulis di dua tempat** — di
+   `apps/api/src/core/auth/session.cookie.ts` dan di `apps/web/src/middleware.ts`.
+   Middleware berjalan di Edge dan tidak bisa mengimpor dari `apps/api`, jadi duplikasinya
+   tidak terhindarkan dengan susunan sekarang. Ini persis situasi yang membuat
+   `ApiErrorResponse` dipindah ke `@oddo/shared` di PRD-001a. Kalau nanti cookie-nya
+   diganti nama dan hanya satu sisi diubah, gejalanya adalah semua orang terlihat
+   ter-logout — dan tidak ada test yang menangkapnya hari ini.
+2. **Aturan `react-hooks` v7 jauh lebih galak dari v5.** Yang dipasang adalah seluruh set
+   `recommended-latest`, termasuk aturan turunan React Compiler seperti
+   `set-state-in-effect` dan `purity`. Hari ini hanya menghasilkan satu temuan (D-3), tapi
+   set ini pada dasarnya menolak pola "fetch di dalam effect". Begitu PRD-002 menambah
+   layar yang mengambil data, Mentor perlu memutuskan: ikut arahannya (pindah ke Server
+   Component atau pustaka data seperti SWR/React Query), atau matikan aturan itu.
+3. **`ADR-0002` §3 belum ditegakkan sepenuhnya.** Guard global sudah menutup semuanya,
+   tapi pemeriksaan saat boot ("endpoint tanpa `@RequirePermission` ditolak") memang
+   sengaja ditunda ke PRD-002 oleh §2.2 PRD ini. Perlu benar-benar ditulis di PRD-002,
+   bukan hanya diasumsikan terbawa.
+4. **Belum ada test yang menjaga daftar publik tetap sinkron dua sisi.** §2.4 menyebut
+   daftar `@Public()` di API dan matcher di web wajib sama. Keduanya hari ini dijaga
+   kedisiplinan, bukan mekanisme — persis keberatan yang `PRODUCT-SCOPE` §4.1 ajukan untuk
+   batas antar-modul.
+5. **`package.json#prisma` masih deprecated** (warisan PRD-000, belum berubah).
+
+---
+
 **Cara menjalankan & menguji:**
+
+```bash
+pnpm install
+cp .env.example .env            # PowerShell: Copy-Item .env.example .env
+pnpm docker:up
+pnpm db:migrate
+pnpm db:seed
+pnpm dev
+```
+
+Buka <http://localhost:3000> — akan dialihkan ke `/login`. Masuk dengan
+`admin@oddo.local` / `ChangeMe!2026`, lalu coba tombol `Keluar`.
+
+```bash
+# gerbang kualitas (kelimanya harus exit 0)
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e                   # butuh Chrome; JANGAN bersamaan dengan pnpm test
+
+# pemeriksaan manual middleware (dev server harus hidup)
+curl -D - -o /dev/null http://localhost:3000/           # 307 -> /login?next=%2F
+curl -D - -o /dev/null http://localhost:3000/health     # 200, tanpa redirect
+curl -D - -o /dev/null -b "oddo_session=<sid>" http://localhost:3000/login   # 307 -> /
+
+# API tertutup
+curl -i http://localhost:3001/api/auth/me               # 401 UNAUTHORIZED
+curl -i http://localhost:3001/api/health                # 200
+
+# E2E memakai browser lain tanpa menyunting file
+PLAYWRIGHT_CHANNEL=msedge pnpm test:e2e
+PLAYWRIGHT_CHANNEL= pnpm test:e2e                       # Chromium bundel (butuh unduhan)
+```
