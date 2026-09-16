@@ -1,20 +1,25 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
-import { useState, type FormEvent, type JSX } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense, useState, type FormEvent, type JSX } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { apiFetch, ApiError, ApiUnreachableError } from '@/lib/api-client'
+import { resolveNextPath } from '@/lib/safe-next'
 
 interface LoginResponse {
   user: { id: string; email: string; name: string; companyId: string; isSuperadmin: boolean }
 }
 
-export default function LoginPage(): JSX.Element {
+function LoginForm(): JSX.Element {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  // Validated here rather than at redirect time: an unusable value should never
+  // survive long enough to be handed to the router (BR-AUTH-011).
+  const nextPath = resolveNextPath(searchParams.get('next'))
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -30,7 +35,7 @@ export default function LoginPage(): JSX.Element {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       })
-      router.push('/')
+      router.push(nextPath)
     } catch (caught) {
       // Only the human-readable message reaches the screen. The error code and
       // request id are for logs and support, not for the person trying to log in.
@@ -94,5 +99,29 @@ export default function LoginPage(): JSX.Element {
         </CardContent>
       </Card>
     </main>
+  )
+}
+
+/**
+ * useSearchParams forces the route out of static rendering unless it sits behind
+ * a Suspense boundary, so the form is wrapped rather than read from
+ * window.location — which would only work after hydration.
+ */
+export default function LoginPage(): JSX.Element {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center px-4 py-10">
+          <Card className="w-full max-w-sm">
+            <CardHeader>
+              <CardTitle className="text-xl">Oddo ERP</CardTitle>
+              <CardDescription>Masuk ke akun Anda</CardDescription>
+            </CardHeader>
+          </Card>
+        </main>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   )
 }

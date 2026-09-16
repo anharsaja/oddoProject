@@ -4,10 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import LoginPage from '@/app/login/page'
 import { API_URL } from '@/lib/config'
 
-const push = vi.fn()
+const mocks = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  searchParams: new URLSearchParams(),
+}))
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push, replace: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ push: mocks.push, replace: mocks.replace, refresh: vi.fn() }),
+  useSearchParams: () => mocks.searchParams,
 }))
 
 function fillAndSubmit(): void {
@@ -20,9 +25,18 @@ function fillAndSubmit(): void {
   fireEvent.click(screen.getByRole('button', { name: 'Masuk' }))
 }
 
+function mockSuccessfulLogin(): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({ user: {} }) }),
+  )
+}
+
 describe('LoginPage', () => {
   beforeEach(() => {
-    push.mockReset()
+    mocks.push.mockReset()
+    mocks.replace.mockReset()
+    mocks.searchParams = new URLSearchParams()
     vi.unstubAllGlobals()
   })
 
@@ -31,11 +45,11 @@ describe('LoginPage', () => {
     vi.restoreAllMocks()
   })
 
-  it('renders both fields with labels tied to them (AC-001a-12)', () => {
+  it('renders both fields with labels tied to them (AC-001a-12)', async () => {
     render(<LoginPage />)
 
+    expect(await screen.findByText('Masuk ke akun Anda')).toBeInTheDocument()
     expect(screen.getByText('Oddo ERP')).toBeInTheDocument()
-    expect(screen.getByText('Masuk ke akun Anda')).toBeInTheDocument()
 
     const email = screen.getByLabelText('Email')
     const password = screen.getByLabelText('Password')
@@ -51,6 +65,7 @@ describe('LoginPage', () => {
     vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => undefined)))
 
     render(<LoginPage />)
+    await screen.findByLabelText('Email')
     fillAndSubmit()
 
     expect(await screen.findByRole('button', { name: 'Memproses…' })).toBeDisabled()
@@ -65,6 +80,7 @@ describe('LoginPage', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     render(<LoginPage />)
+    await screen.findByLabelText('Email')
     fillAndSubmit()
 
     await waitFor(() => {
@@ -77,17 +93,36 @@ describe('LoginPage', () => {
     expect(init.body).toBe(JSON.stringify({ email: 'admin@oddo.local', password: 'ChangeMe!2026' }))
   })
 
-  it('redirects to the root page once login succeeds (AC-001a-12)', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({ user: {} }) }),
-    )
+  /**
+   * The table from AC-001b-05, run as data rather than as seven near-identical
+   * tests: what matters is that every rejected shape lands in the same place.
+   */
+  describe('destination after a successful login (AC-001b-05)', () => {
+    const cases: Array<{ name: string; query: string; expected: string }> = [
+      { name: 'a relative path is honoured', query: 'next=/settings/users', expected: '/settings/users' },
+      { name: 'an absolute URL is ignored', query: 'next=https://contoh.com', expected: '/' },
+      { name: 'a protocol-relative URL is ignored', query: 'next=//contoh.com', expected: '/' },
+      { name: 'a backslash escape is ignored', query: 'next=/%5Ccontoh.com', expected: '/' },
+      { name: 'the login page itself is ignored', query: 'next=/login', expected: '/' },
+      { name: 'an empty value falls back', query: 'next=', expected: '/' },
+      { name: 'no parameter at all falls back', query: '', expected: '/' },
+    ]
 
-    render(<LoginPage />)
-    fillAndSubmit()
+    it.each(cases)('$name', async ({ query, expected }) => {
+      mocks.searchParams = new URLSearchParams(query)
+      mockSuccessfulLogin()
 
-    await waitFor(() => {
-      expect(push).toHaveBeenCalledWith('/')
+      render(<LoginPage />)
+      await screen.findByLabelText('Email')
+      fillAndSubmit()
+
+      await waitFor(() => {
+        expect(mocks.push).toHaveBeenCalledWith(expected)
+      })
+
+      // A rejected value is not the visitor's mistake, and saying so out loud
+      // only tells whoever is probing that it was noticed.
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
   })
 
@@ -115,6 +150,7 @@ describe('LoginPage', () => {
     )
 
     render(<LoginPage />)
+    await screen.findByLabelText('Email')
     fillAndSubmit()
 
     const alert = await screen.findByRole('alert')
@@ -122,7 +158,7 @@ describe('LoginPage', () => {
 
     expect(screen.queryByText(/UNAUTHORIZED/)).not.toBeInTheDocument()
     expect(screen.queryByText(/01920000-0000-7000-8000-00000000abcd/)).not.toBeInTheDocument()
-    expect(push).not.toHaveBeenCalled()
+    expect(mocks.push).not.toHaveBeenCalled()
   })
 
   it('re-enables the form after a failure so the user can try again', async () => {
@@ -136,6 +172,7 @@ describe('LoginPage', () => {
     )
 
     render(<LoginPage />)
+    await screen.findByLabelText('Email')
     fillAndSubmit()
 
     await screen.findByRole('alert')
@@ -146,6 +183,7 @@ describe('LoginPage', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
 
     render(<LoginPage />)
+    await screen.findByLabelText('Email')
     fillAndSubmit()
 
     const alert = await screen.findByRole('alert')
