@@ -1,12 +1,12 @@
 ---
 id: PRD-000
 title: Project scaffolding — monorepo, Docker, Prisma, health check
-status: draft
+status: ready
 priority: P0
 modules: [infra]
 depends_on: []
 blocks: [PRD-001]
-estimasi: ~5 jam / 1 sesi coder
+estimasi: ~8 jam / 1 sesi coder — checkpoint wajib setelah langkah 11
 created: 2026-09-16
 updated: 2026-09-16
 ---
@@ -44,7 +44,8 @@ setup-nya atau desainnya.
 ### 2.1 Termasuk (In Scope)
 
 - [ ] Monorepo pnpm workspace: `apps/api`, `apps/web`, `packages/shared`, `packages/config`
-- [ ] `docker-compose.yml` berisi PostgreSQL 16 dan Redis 7 dengan volume persisten
+- [ ] `docker-compose.yml` berisi PostgreSQL 16 dan Redis 7 dengan volume persisten,
+      `healthcheck`, dan script init yang menyiapkan database `oddo_dev` **dan** `oddo_test`
 - [ ] `apps/api`: NestJS yang berjalan, dengan global `ValidationPipe`, exception filter,
       request-id interceptor, dan logger pino
 - [ ] Validasi environment variable saat boot memakai `zod` — gagal keras kalau kurang
@@ -57,7 +58,7 @@ setup-nya atau desainnya.
 - [ ] `packages/config`: konfigurasi ESLint dan `tsconfig` base yang di-extend keduanya
 - [ ] Jest di `apps/api` (unit + integration dengan Postgres nyata), Vitest di `apps/web`
 - [ ] Script npm di root: `dev`, `build`, `test`, `lint`, `typecheck`, `db:*`, `docker:*`
-- [ ] `.env.example` lengkap dan `README.md` berisi cara menjalankan dari nol
+- [ ] `.env.example` + `.env.test` lengkap, dan `README.md` berisi cara menjalankan dari nol
 - [ ] `.gitignore`, dan repo di-`git init` kalau belum
 
 ### 2.2 Tidak Termasuk (Out of Scope)
@@ -82,6 +83,53 @@ setup-nya atau desainnya.
   shell POSIX — hindari sintaks khusus salah satunya (jangan pakai `&&` di script npm
   yang bergantung pada shell, pakai `pnpm run a && pnpm run b` lewat npm-run-all atau
   pisah jadi beberapa script).
+
+### 2.4 Konvensi tetap — nilai konkret, bukan saran
+
+Nilai-nilai berikut **ditetapkan di sini** dan dipakai selamanya oleh seluruh PRD
+berikutnya. Jangan diganti tanpa ADR baru.
+
+**Nama package** (field `name` di tiap `package.json`):
+
+| Lokasi | `name` | Dipanggil dengan |
+|---|---|---|
+| `apps/api` | `@oddo/api` | `pnpm --filter @oddo/api <script>` |
+| `apps/web` | `@oddo/web` | `pnpm --filter @oddo/web <script>` |
+| `packages/shared` | `@oddo/shared` | `import { HealthResponse } from '@oddo/shared'` |
+| `packages/config` | `@oddo/config` | di-extend oleh `tsconfig.json` & `eslint.config.js` |
+
+Root `package.json` diberi `"name": "oddo"` dan `"private": true`.
+Perhatikan: karena nama package ber-scope, filter **wajib** memakai nama lengkap —
+`pnpm --filter api` tidak akan cocok dengan `@oddo/api`.
+
+**Port dan URL:**
+
+| Yang mana | Nilai | Keterangan |
+|---|---|---|
+| `apps/api` | **3001** | default `PORT`, boleh ditimpa lewat env |
+| `apps/web` | **3000** | default Next.js |
+| PostgreSQL (host) | **5433** | sengaja bukan 5432, lihat §11 no. 5 |
+| Redis (host) | **6379** | |
+| Global prefix API | **`/api`** | dipasang lewat `setGlobalPrefix('api')`, sehingga URL penuhnya `http://localhost:3001/api/health` |
+
+**Environment variable:**
+
+| Variable | Milik | Contoh nilai di `.env.example` | Wajib? |
+|---|---|---|---|
+| `NODE_ENV` | api | `development` | ya |
+| `PORT` | api | `3001` | ya |
+| `DATABASE_URL` | api | `postgresql://oddo:oddo@localhost:5433/oddo_dev?schema=public` | ya |
+| `REDIS_URL` | api | `redis://localhost:6379/0` | ya |
+| `WEB_ORIGIN` | api | `http://localhost:3000` | ya |
+| `LOG_LEVEL` | api | `debug` | ya |
+| `NEXT_PUBLIC_API_URL` | web | `http://localhost:3001/api` | ya |
+
+`NEXT_PUBLIC_API_URL` inilah URL yang ditampilkan halaman web saat API tidak bisa
+dihubungi (AC-000-11). Nilainya dibaca sekali di satu modul konfigurasi, bukan disebar
+sebagai `process.env` di banyak komponen.
+
+**Database:** container Postgres menyediakan **dua** database sejak awal —
+`oddo_dev` untuk development dan `oddo_test` untuk integration test. Lihat §13 langkah 4.
 
 ---
 
@@ -214,8 +262,19 @@ bekerja** sebelum ada tabel yang penting.
 | `created_at` | `TIMESTAMPTZ` | no | `now()` | no | |
 | `updated_at` | `TIMESTAMPTZ` | no | `now()` | no | diperbarui otomatis |
 
-Tabel ini **global**, bukan milik company — karena itu tidak punya `company_id`.
-Ini salah satu dari empat pengecualian yang disebut `ADR-0002` §2.
+**Kenapa tabel ini tidak memakai base fields lengkap `ADR-0002` §4 — ini disengaja,
+bukan kelalaian. Jangan tambahkan sendiri.**
+
+| Field base yang tidak ada | Alasan |
+|---|---|
+| `company_id` | `system_setting` adalah setelan tingkat **instance**, bukan milik company. Ini salah satu dari empat pengecualian yang sudah disebut `ADR-0002` §2 |
+| `created_by`, `updated_by` | Keduanya foreign key ke tabel `user`, dan **tabel `user` belum ada** — baru dibuat di PRD-001. FK ke tabel yang belum ada tidak mungkin. Baris seed juga tidak dibuat oleh user mana pun, melainkan oleh proses sistem |
+| `active` | Setelan sistem tidak punya siklus hidup "diarsipkan". Setelan yang tidak berlaku lagi dihapus barisnya, dan tidak ada dokumen lain yang menunjuk ke sini |
+
+`ADR-0002` §4 berbunyi "wajib di setiap **tabel bisnis**". `system_setting` bukan tabel
+bisnis — tidak ada user yang mengelolanya lewat layar, tidak ada dokumen yang
+mereferensikannya. Klarifikasi ini sudah ditambahkan ke `ADR-0002` §4 supaya PRD
+berikutnya tidak menghadapi keraguan yang sama.
 
 **Index:** unique pada `key` (sudah otomatis dari constraint unique).
 
@@ -296,6 +355,15 @@ Endpoint health ditandai `@Public()` sejak sekarang.
   dengan `error: "timeout"` — health check tidak boleh ikut menggantung
 - **Errors:** tidak melempar exception. Kegagalan dependency dilaporkan di body dengan
   HTTP 503
+- **Health sengaja TIDAK memakai bentuk error `ADR-0001` B8.** Perhatikan body 503 di
+  atas: bentuknya `{status, version, uptimeSeconds, timestamp, checks}`, bukan
+  `{statusCode, code, message, details, requestId, timestamp}`. Ini bukan
+  ketidakkonsistenan — 503 di sini berarti "sistem sedang sakit", bukan "request Anda
+  salah", dan monitoring butuh melihat *dependency mana* yang mati.
+  **Implementasinya:** controller menulis status code langsung ke response
+  (`@Res({ passthrough: true })` lalu `res.status(503)`, atau `@HttpCode` dinamis) dan
+  mengembalikan objek biasa. **Jangan** melempar `ServiceUnavailableException` — kalau
+  dilempar, `AllExceptionsFilter` akan membungkusnya jadi bentuk B8 dan AC-000-03 gagal
 - **Side effects:** tidak ada
 - **Idempotency:** ya, karena read-only
 
@@ -401,13 +469,28 @@ melompat — kalau langkah 4 gagal, penyebabnya pasti ada di langkah 1–3.
    `ErrorCode` (isi awal: `VALIDATION_ERROR`, `NOT_FOUND`, `FORBIDDEN`, `STATE_CONFLICT`,
    `INTERNAL_ERROR`). Ekspor lewat satu `index.ts`.
 4. **`docker-compose.yml`.** PostgreSQL 16 (host port **5433**), Redis 7 (host port 6379),
-   keduanya dengan named volume dan `healthcheck`. Jalankan dan pastikan keduanya hidup
-   sebelum lanjut.
-5. **`apps/api` kerangka NestJS.** Scaffold, sambungkan ke `packages/config` dan
-   `packages/shared`. Pastikan `pnpm --filter api dev` menyala.
-6. **Validasi environment.** Skema `zod` untuk `NODE_ENV`, `PORT`, `DATABASE_URL`,
-   `REDIS_URL`, `WEB_ORIGIN`, `LOG_LEVEL`. Gagal keras saat boot kalau tidak valid.
-   Buat `.env.example`. **Uji dengan sengaja menghapus satu variable.**
+   keduanya dengan named volume dan `healthcheck`.
+   - Postgres wajib menyiapkan **dua database**: `oddo_dev` dan `oddo_test`. Caranya:
+     mount script `docker/postgres/init/01-create-databases.sh` ke
+     `/docker-entrypoint-initdb.d/` — image resmi Postgres menjalankan isi folder itu
+     sekali saat volume pertama dibuat. Script membuat `oddo_test` (database `oddo_dev`
+     dibuat lewat `POSTGRES_DB`).
+   - Karena script init hanya jalan saat volume **kosong**: kalau volume sudah terlanjur
+     ada tanpa `oddo_test`, jalankan `pnpm docker:down -v` lalu `pnpm docker:up`.
+     Tulis catatan ini di README.
+   - Redis memakai index database berbeda untuk memisahkan test dari development:
+     `/0` untuk dev, `/1` untuk test.
+   - `pnpm docker:up` **wajib menunggu sampai healthcheck hijau** (`docker compose up -d
+     --wait`), bukan langsung kembali. Tanpa ini, `db:migrate` yang dijalankan sesudahnya
+     gagal secara acak karena Postgres belum siap menerima koneksi.
+5. **`apps/api` kerangka NestJS.** Scaffold dengan `name: "@oddo/api"`, sambungkan ke
+   `@oddo/config` dan `@oddo/shared`. Pasang `setGlobalPrefix('api')`.
+   Pastikan `pnpm --filter @oddo/api dev` menyala di port 3001.
+6. **Validasi environment.** Skema `zod` untuk keenam variable milik api di §2.4
+   (`NODE_ENV`, `PORT`, `DATABASE_URL`, `REDIS_URL`, `WEB_ORIGIN`, `LOG_LEVEL`).
+   Gagal keras saat boot kalau tidak valid. Buat `.env.example` **dan** `.env.test`
+   (isinya sama, kecuali `DATABASE_URL` menunjuk `oddo_test` dan `REDIS_URL` ke `/1`).
+   **Uji dengan sengaja menghapus satu variable.**
 7. **Lapis `common/`.** `AllExceptionsFilter` (bentuk error `ADR-0001` B8),
    `RequestIdInterceptor` (pakai UUID v7, hormati header `X-Request-Id` kalau ada),
    `ValidationPipe` global, logger pino, decorator `@Public()`, `RequestContext`
@@ -420,16 +503,28 @@ melompat — kalau langkah 4 gagal, penyebabnya pasti ada di langkah 1–3.
 10. **Modul health.** `HealthController` + `HealthService` dengan pemeriksaan database
     dan Redis, masing-masing bertimeout 2 detik. Kembalikan 200 atau 503 sesuai
     `BR-INFRA-002`.
-11. **Test `apps/api`.** Jest terpasang. Unit test untuk logika penentuan
-    `ok`/`degraded`. Integration test dengan Postgres nyata untuk: health 200,
-    health 503 saat Redis mati, 404 berbentuk standar, dan validasi body lewat
-    controller khusus test.
-12. **`apps/web` kerangka Next.js.** App Router, TypeScript, Tailwind, shadcn/ui
-    (hanya `card`, `badge`, `button`, `skeleton`). Sambungkan ke `packages/shared`
-    dan `packages/config`.
-13. **Halaman health.** Panggil `GET /api/health`, tampilkan sesuai bagian 10,
-    lengkap dengan loading dan error state. Tipe response **wajib** memakai
-    `HealthResponse` dari `packages/shared`, bukan tipe yang ditulis ulang.
+11. **Test `apps/api`.** Jest terpasang, memuat `.env.test` sehingga memakai database
+    `oddo_test` dan Redis index `/1`. Setup test menjalankan `prisma migrate deploy` ke
+    `oddo_test` sekali di awal, lalu membersihkan tabel sebelum tiap file test.
+    - Unit: logika penentuan `ok` vs `degraded`; skema validasi env.
+    - Integration: health 200; health 503 dengan `REDIS_URL` diarahkan ke port mati;
+      404 berbentuk standar; body dengan field tak dikenal → 400 lewat controller
+      khusus test.
+
+> ### ⛳ CHECKPOINT — berhenti di sini kalau sesi harus dipotong
+>
+> Setelah langkah 11, seluruh backend beserta test-nya sudah hijau dan bisa di-commit
+> sebagai satu kesatuan yang utuh. Kalau waktu/konteks sesi menipis, **berhenti di sini**,
+> commit, isi bagian "Catatan Coder" dengan menyebut langkah 12–16 belum dikerjakan,
+> dan set `status: review`. Jangan berhenti di tengah wiring Next.js — itu meninggalkan
+> workspace yang tidak bisa di-build.
+
+12. **`apps/web` kerangka Next.js.** `name: "@oddo/web"`, App Router, TypeScript,
+    Tailwind, shadcn/ui (hanya `card`, `badge`, `button`, `skeleton`). Sambungkan ke
+    `@oddo/shared` dan `@oddo/config`.
+13. **Halaman health.** Panggil `GET /api/health` lewat `NEXT_PUBLIC_API_URL`,
+    tampilkan sesuai bagian 10, lengkap dengan loading dan error state. Tipe response
+    **wajib** memakai `HealthResponse` dari `@oddo/shared`, bukan tipe yang ditulis ulang.
 14. **Test `apps/web`.** Vitest + Testing Library: render state loading, state sehat,
     state degraded, dan state API tidak terjangkau.
 15. **Script root & README.** Semua script di bagian "Perintah" di bawah harus jalan.
@@ -440,18 +535,19 @@ melompat — kalau langkah 4 gagal, penyebabnya pasti ada di langkah 1–3.
 
 **Perintah yang harus ada di `package.json` root:**
 
-| Script | Fungsi |
-|---|---|
-| `pnpm docker:up` / `docker:down` | Menyalakan/mematikan Postgres & Redis |
-| `pnpm dev` | Menjalankan api dan web sekaligus |
-| `pnpm build` | Build seluruh workspace |
-| `pnpm test` | Test seluruh workspace |
-| `pnpm lint` | ESLint seluruh workspace |
-| `pnpm typecheck` | `tsc --noEmit` seluruh workspace |
-| `pnpm db:migrate` | `prisma migrate dev` |
-| `pnpm db:seed` | Seed sistem |
-| `pnpm db:studio` | Prisma Studio |
-| `pnpm db:reset` | Reset database lalu migrasi & seed ulang |
+| Script | Fungsi | Catatan wajib |
+|---|---|---|
+| `pnpm docker:up` | Menyalakan Postgres & Redis | **Wajib** `docker compose up -d --wait` — harus menunggu healthcheck hijau |
+| `pnpm docker:down` | Mematikan keduanya | `docker:down -v` (ikut menghapus volume) harus tetap bisa dijalankan |
+| `pnpm dev` | Menjalankan api dan web sekaligus | |
+| `pnpm build` | Build seluruh workspace | |
+| `pnpm test` | Test seluruh workspace | Memakai `oddo_test`, bukan `oddo_dev` |
+| `pnpm lint` | ESLint seluruh workspace | **Wajib** `--max-warnings=0` — warning diperlakukan sebagai kegagalan |
+| `pnpm typecheck` | `tsc --noEmit` seluruh workspace | |
+| `pnpm db:migrate` | `prisma migrate dev` ke `oddo_dev` | |
+| `pnpm db:seed` | Seed sistem ke `oddo_dev` | |
+| `pnpm db:studio` | Prisma Studio | |
+| `pnpm db:reset` | Reset `oddo_dev` lalu migrasi & seed ulang | |
 
 **Urutan commit yang disarankan:**
 workspace & config → docker → api kerangka + env → common → prisma + migrasi + seed →
@@ -465,10 +561,18 @@ health → test api → web + halaman → test web → README.
 AC-000-01  Setup dari nol
 
 Given: repo baru di-clone, Docker Desktop berjalan, dan belum ada .env
-When:  developer menjalankan `pnpm install`, menyalin .env.example ke .env,
-       lalu `pnpm docker:up`, `pnpm db:migrate`, `pnpm db:seed`, `pnpm dev`
+When:  developer menjalankan persis urutan ini tanpa jeda manual di antaranya:
+         pnpm install
+         (salin .env.example -> .env)
+         pnpm docker:up
+         pnpm db:migrate
+         pnpm db:seed
+         pnpm dev
 Then:  http://localhost:3000 terbuka dan menampilkan status Database "up"
-       dan Redis "up", tanpa langkah tambahan yang tidak tertulis di README
+       dan Redis "up", tanpa langkah tambahan yang tidak tertulis di README.
+       `pnpm db:migrate` TIDAK BOLEH gagal karena Postgres belum siap — `docker:up`
+       sudah menunggu healthcheck. Jalankan urutan ini 3x dari volume kosong;
+       ketiganya harus berhasil (menguji bahwa tidak ada race)
 ```
 
 ```text
@@ -485,22 +589,34 @@ Then:  status HTTP 200, body.status = "ok",
 ```text
 AC-000-03  Health check saat dependency mati
 
-Given: Postgres berjalan tetapi container Redis dihentikan
-When:  GET /api/health dipanggil
+Bukti yang mengikat adalah integration test OTOMATIS (huruf a).
+Pemeriksaan manual (huruf b) sifatnya smoke check, boleh dilakukan sekali.
+
+(a) OTOMATIS — ini yang menentukan lulus/tidak
+Given: aplikasi di-boot di dalam test dengan REDIS_URL diarahkan ke port yang
+       tidak ada yang mendengarkan (mis. redis://localhost:6399/1),
+       sementara Postgres normal
+When:  GET /api/health dipanggil lewat Supertest
 Then:  status HTTP 503, body.status = "degraded",
-       body.checks.redis.status = "down" dan memuat field error,
+       body.checks.redis.status = "down" dan punya field error non-kosong,
        body.checks.database.status tetap "up",
-       dan proses API tetap hidup (request berikutnya masih dilayani)
+       body TIDAK berbentuk error ADR-0001 B8 (tidak ada field "code"),
+       dan request kedua ke endpoint yang sama masih dilayani (proses tidak mati)
+
+(b) MANUAL — smoke check
+Given: sistem berjalan normal
+When:  `docker compose stop redis` lalu GET http://localhost:3001/api/health
+Then:  hasil yang sama seperti (a)
 ```
 
 ```text
 AC-000-04  Environment tidak valid
 
 Given: variable DATABASE_URL dihapus dari .env
-When:  `pnpm --filter api dev` dijalankan
+When:  `pnpm --filter @oddo/api dev` dijalankan
 Then:  proses keluar dengan exit code bukan 0 dalam waktu < 5 detik,
        dan stdout memuat nama variable "DATABASE_URL" beserta alasannya.
-       Tidak ada server yang mulai mendengarkan port
+       Tidak ada server yang mulai mendengarkan port 3001
 ```
 
 ```text
@@ -525,11 +641,28 @@ Then:  status HTTP 400 dengan code = "VALIDATION_ERROR",
 ```text
 AC-000-07  Tipe dipakai bersama
 
-Given: tipe HealthResponse didefinisikan di packages/shared
-When:  field pada HealthResponse diubah namanya lalu `pnpm typecheck` dijalankan
-Then:  typecheck GAGAL di apps/api DAN di apps/web
-       (membuktikan keduanya benar-benar memakai tipe yang sama,
-        bukan menuliskannya ulang masing-masing)
+Dibuktikan dua cara: satu guard otomatis, satu prosedur manual yang hasilnya
+ditempel sebagai bukti.
+
+(a) OTOMATIS — guard permanen
+Given: implementasi selesai
+When:  `pnpm test` dijalankan
+Then:  ada satu test yang memindai isi apps/** dan GAGAL kalau menemukan
+       deklarasi lokal bernama HealthResponse atau HealthCheckResult
+       (pola "interface HealthResponse", "type HealthResponse", dan dua
+        padanannya untuk HealthCheckResult). Test ini lulus pada kode final
+
+(b) MANUAL — prosedur sekali jalan, buktinya wajib ditempel
+Given: HealthResponse hanya dideklarasikan di packages/shared
+When:  Coder menjalankan prosedur ini persis:
+         1. ubah nama field `checks` menjadi `checksRenamed` di @oddo/shared
+         2. jalankan `pnpm typecheck`
+         3. salin keluaran error-nya
+         4. kembalikan perubahan langkah 1
+Then:  keluaran dari langkah 3 memuat error yang berasal dari @oddo/api
+       DAN dari @oddo/web (dua-duanya, bukan salah satu),
+       keluaran itu ditempel di bagian "Catatan Coder" dokumen ini,
+       dan setelah langkah 4 `pnpm typecheck` kembali exit code 0
 ```
 
 ```text
@@ -546,8 +679,12 @@ AC-000-09  Pagar kualitas hijau
 
 Given: seluruh implementasi PRD ini selesai
 When:  `pnpm lint`, `pnpm typecheck`, dan `pnpm test` dijalankan
-Then:  ketiganya selesai dengan exit code 0, tanpa warning yang dibiarkan
-       dan tanpa test yang di-skip
+Then:  ketiganya selesai dengan exit code 0, DAN:
+       - `pnpm lint` dijalankan dengan `--max-warnings=0`, sehingga exit 0
+         berarti nol error DAN nol warning
+       - tidak ada aturan ESLint yang dimatikan lewat komentar inline
+         (`eslint-disable`) tanpa alasan tertulis di baris yang sama
+       - laporan `pnpm test` menunjukkan 0 skipped dan 0 todo
 ```
 
 ```text
@@ -564,9 +701,21 @@ AC-000-11  Halaman web menangani backend mati
 
 Given: apps/web berjalan tetapi apps/api dihentikan
 When:  http://localhost:3000 dibuka
-Then:  halaman menampilkan pesan bahwa API tidak dapat dihubungi beserta URL-nya
-       dan sebuah tombol "Coba lagi".
+Then:  halaman menampilkan pesan bahwa API tidak dapat dihubungi, dan pesan itu
+       memuat nilai NEXT_PUBLIC_API_URL apa adanya (http://localhost:3001/api),
+       beserta sebuah tombol "Coba lagi".
        Tidak ada halaman putih, tidak ada stack trace yang terlihat user
+```
+
+```text
+AC-000-12  Test terpisah dari database development
+
+Given: `oddo_dev` sudah berisi hasil `pnpm db:seed`
+When:  `pnpm test` dijalankan sampai selesai
+Then:  isi `oddo_dev` tidak berubah sama sekali (jumlah baris system_setting
+       dan nilainya tetap), karena integration test memakai `oddo_test`.
+       Menjalankan `pnpm test` dua kali berturut-turut sama-sama hijau
+       tanpa perlu membersihkan database secara manual
 ```
 
 ---
@@ -581,14 +730,28 @@ Then:  halaman menampilkan pesan bahwa API tidak dapat dihubungi beserta URL-nya
 | Integration (api) | `GET /api/health` → 503 saat Redis tidak terjangkau | Arahkan `REDIS_URL` ke port mati |
 | Integration (api) | Route tak dikenal → 404 berbentuk standar | Menguji exception filter |
 | Integration (api) | Body dengan field tak dikenal → 400 | Lewat controller khusus test, bukan route produksi |
+| Guard (api) | Tidak ada deklarasi lokal `HealthResponse` / `HealthCheckResult` di `apps/**` | Memindai file, bukan menjalankan kode. Mendukung AC-000-07 (a) |
 | Unit (web) | Render state loading, sehat, degraded, dan API tak terjangkau | Vitest + Testing Library, `fetch` di-mock |
 
 **Data uji / fixture yang dibutuhkan:**
 seed sistem (`app.version`, `app.initialized_at`). Tidak ada fixture lain.
 
-**Catatan penting:** integration test **tidak boleh** memakai database yang sama dengan
-development. Pakai database terpisah (mis. `oddo_test`) yang di-migrate dan dibersihkan
-sebelum setiap run. Tuliskan caranya di README.
+**Isolasi database test — sudah ditetapkan, bukan pilihan Coder:**
+
+| Aspek | Nilai |
+|---|---|
+| Database | `oddo_test`, dibuat oleh script init Postgres di §13 langkah 4 |
+| Redis | index `/1` (development memakai `/0`) |
+| Sumber env | `.env.test`, dimuat otomatis oleh konfigurasi Jest |
+| Persiapan | `prisma migrate deploy` ke `oddo_test` sekali di global setup |
+| Pembersihan | `TRUNCATE` tabel yang dipakai sebelum tiap file test — bukan `migrate reset`, supaya cepat |
+
+Integration test **tidak boleh** menyentuh `oddo_dev`. Dibuktikan oleh AC-000-12.
+
+**Cara mematikan Redis di dalam test:** arahkan `REDIS_URL` ke port yang tidak
+didengarkan siapa pun (mis. `redis://localhost:6399/1`) saat membangun testing module.
+**Jangan** menghentikan container dari dalam test — test tidak boleh bergantung pada
+Docker CLI, dan menghentikan container akan mengganggu test lain yang berjalan bersamaan.
 
 ---
 
@@ -601,9 +764,12 @@ sebelum setiap run. Tuliskan caranya di README.
 - [ ] Audit log — **tidak berlaku di PRD ini**; logging terstruktur sudah jalan
       dan membawa `requestId`
 - [ ] Error state & validasi sesuai bagian 9 dan 11
-- [ ] `pnpm lint` dan `pnpm typecheck` bersih
-- [ ] `README.md` berisi langkah setup dari nol dan sudah diuji ulang dari kondisi bersih
-- [ ] `.env.example` lengkap dan cocok dengan skema validasi
+- [ ] `pnpm lint` (dengan `--max-warnings=0`) dan `pnpm typecheck` bersih
+- [ ] `README.md` berisi langkah setup dari nol dan sudah diuji ulang dari kondisi bersih,
+      termasuk catatan "kalau volume Postgres sudah ada tanpa `oddo_test`, jalankan
+      `pnpm docker:down -v`"
+- [ ] `.env.example` dan `.env.test` lengkap dan cocok dengan skema validasi
+- [ ] Keluaran typecheck dari prosedur AC-000-07 (b) sudah ditempel di "Catatan Coder"
 - [ ] File migrasi Prisma di-commit
 - [ ] Bagian "Perintah penting" di `CLAUDE.md` diisi dengan script yang benar-benar ada
 - [ ] `docs/prd/README.md` diperbarui

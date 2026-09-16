@@ -231,6 +231,28 @@ confirm(@Param('id') id: string, @CurrentCompany() companyId: string) { ... }
 | `updated_by` | UUID nullable | FK user |
 | `active` | boolean default true | **archive**, bukan delete |
 
+### Apa yang dihitung sebagai "tabel bisnis"
+
+Aturan di atas berlaku untuk **tabel bisnis**: tabel yang dikelola user lewat layar,
+atau yang direferensikan oleh dokumen. Yang **bukan** tabel bisnis dan karena itu bebas
+dari base fields:
+
+| Jenis | Contoh | Yang tidak dipakai |
+|---|---|---|
+| Setelan tingkat instance | `system_setting` | `company_id`, `created_by`, `updated_by`, `active` |
+| Katalog sistem yang hanya diisi seed | `permission`, `uom_category` | `company_id`, `active` |
+| Tabel append-only | `audit_log` | `updated_by`, `updated_at`, `active` — barisnya memang tidak pernah diubah |
+| Milik infrastruktur | `_prisma_migrations` | semuanya |
+
+Satu pengecualian yang bersifat sementara, bukan permanen: **sebelum tabel `user` ada
+(yaitu di PRD-000), `created_by` dan `updated_by` mustahil dibuat** karena tidak ada
+target foreign key-nya. Tabel apa pun yang dibuat sebelum PRD-001 bebas dari kedua field
+itu, dan PRD yang membuatnya **wajib menuliskan alasannya di bagian 7.2**, bukan
+membiarkannya kosong tanpa penjelasan.
+
+Kalau ragu sebuah tabel termasuk kategori mana: pakai base fields lengkap. Kelebihan
+kolom audit jauh lebih murah daripada kekurangannya.
+
 ### Archive, bukan delete
 
 Dokumen bisnis **tidak pernah dihapus permanen**. Master data yang tidak dipakai lagi
@@ -305,6 +327,25 @@ dengan cakupan dipersempit sampai muat satu sesi Coder.
 **Ukuran yang dianggap kebesaran** (tanda PRD harus dipecah):
 lebih dari ~6 tabel baru, atau lebih dari ~10 endpoint, atau menyentuh lebih dari
 2 modul sekaligus, atau ada lebih dari satu state machine baru.
+
+### Heuristik di atas buta terhadap PRD infrastruktur
+
+Keempat ukuran itu menghitung **kompleksitas bisnis**. PRD yang isinya menyiapkan
+perkakas — scaffolding, migrasi besar, penggantian library, pemasangan CI — bisa
+mendapat skor nyaris nol di keempatnya dan tetap menghabiskan satu sesi penuh.
+PRD-000 contohnya: 1 tabel, 1 endpoint, 0 modul, 0 state machine, tapi justru
+PRD terberat di seluruh roadmap.
+
+Untuk PRD jenis ini, ukuran yang dipakai adalah **jumlah perkakas baru yang harus
+dikonfigurasi dari nol**. Lebih dari ~8 (package manager, container, ORM, test runner,
+linter, logger, framework backend, framework frontend, dan seterusnya) berarti PRD-nya
+berat, terlepas dari berapa tabel yang dibuat.
+
+Kalau PRD infrastruktur tidak bisa dipecah tanpa merusak nilainya — misalnya karena
+ada acceptance criteria yang menuntut dua sisi ada sekaligus — **jangan dipecah**.
+Gantinya, tanamkan **checkpoint eksplisit** di bagian 13: satu titik di tengah rencana
+implementasi yang hasilnya utuh, bisa di-commit, dan aman dijadikan tempat berhenti
+kalau sesi harus dipotong.
 
 ---
 
