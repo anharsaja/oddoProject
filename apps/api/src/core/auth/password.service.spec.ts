@@ -1,4 +1,4 @@
-import { PasswordService } from './password.service'
+import { ARGON2_OPTIONS, DUMMY_PASSWORD_HASH, PasswordService } from './password.service'
 
 describe('PasswordService', () => {
   const passwords = new PasswordService()
@@ -36,5 +36,27 @@ describe('PasswordService', () => {
 
   it('treats a malformed hash as a failed verification rather than an error', async () => {
     await expect(passwords.verify('not-a-hash', 'whatever')).resolves.toBe(false)
+  })
+
+  /**
+   * The dummy exists to cost the same as a real verification. A dummy hashed
+   * with different parameters costs a different amount of time, and the leak it
+   * was added to close comes straight back (BR-AUTH-009).
+   */
+  describe('verifyDummy', () => {
+    it('uses exactly the parameters hash() uses', async () => {
+      const real = await passwords.hash('any password at all')
+      const parametersOf = (encoded: string): string => encoded.split('$')[3] ?? ''
+
+      expect(DUMMY_PASSWORD_HASH.startsWith('$argon2id$')).toBe(true)
+      expect(parametersOf(DUMMY_PASSWORD_HASH)).toBe(parametersOf(real))
+      expect(parametersOf(DUMMY_PASSWORD_HASH)).toBe(
+        `m=${String(ARGON2_OPTIONS.memoryCost)},t=${String(ARGON2_OPTIONS.timeCost)},p=${String(ARGON2_OPTIONS.parallelism)}`,
+      )
+    })
+
+    it('completes without throwing and without revealing anything', async () => {
+      await expect(passwords.verifyDummy()).resolves.toBeUndefined()
+    })
   })
 })

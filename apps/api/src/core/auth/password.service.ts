@@ -15,6 +15,18 @@ export const ARGON2_OPTIONS = {
   parallelism: 1,
 } as const
 
+/**
+ * A real argon2id hash of a random string nobody kept, with exactly the
+ * parameters above (BR-AUTH-009).
+ *
+ * It exists to be verified against and fail. The parameters have to match
+ * ARGON2_OPTIONS character for character: a dummy hashed with a different
+ * memoryCost takes a different amount of time to reject, and the timing leak it
+ * was added to close reopens.
+ */
+export const DUMMY_PASSWORD_HASH =
+  '$argon2id$v=19$m=19456,t=2,p=1$wlbrROCe9McPcQSDwVMrSg$Qi5e5FPWF2xOXwd5drtW4dXB47A0JF+IPzH4gPAe6nA'
+
 @Injectable()
 export class PasswordService {
   /** Returns the full encoded string: algorithm, parameters and salt included. */
@@ -33,5 +45,16 @@ export class PasswordService {
     } catch {
       return false
     }
+  }
+
+  /**
+   * Burns the same time a real verification would, and throws the answer away.
+   *
+   * Called on the login paths that have no password to check — unknown email,
+   * deactivated account — so that the response time cannot be used to work out
+   * which addresses have accounts here (BR-AUTH-009).
+   */
+  async verifyDummy(): Promise<void> {
+    await this.verify(DUMMY_PASSWORD_HASH, 'not the password behind the dummy hash')
   }
 }

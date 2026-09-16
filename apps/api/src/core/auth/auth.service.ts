@@ -31,17 +31,17 @@ export class AuthService {
     const normalizedEmail = email.trim().toLowerCase()
     const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } })
 
-    const credentialsAccepted =
-      user !== null && user.active && (await this.passwords.verify(user.passwordHash, password))
+    // Neither of these paths has a password to check, so neither would reach
+    // argon2 on its own — and answering in a millisecond instead of a hundred
+    // is itself an answer: it says this address has no account here
+    // (BR-AUTH-009). The dummy verification buys back the time.
+    if (user === null || !user.active) {
+      await this.passwords.verifyDummy()
+      this.rejectLogin(normalizedEmail)
+    }
 
-    if (!credentialsAccepted || user === null) {
-      // The reason is recorded here but never returned: operators need to tell
-      // these cases apart, callers must not (§12.1).
-      this.logger.warn(
-        { event: 'auth.login.failed', email: normalizedEmail },
-        'Login attempt rejected',
-      )
-      throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE)
+    if (!(await this.passwords.verify(user.passwordHash, password))) {
+      this.rejectLogin(normalizedEmail)
     }
 
     const session = await this.sessions.create(user.id, user.companyId)
@@ -57,6 +57,16 @@ export class AuthService {
     )
 
     return { user, session }
+  }
+
+  /**
+   * BR-AUTH-002: every failed login leaves through here, so the three cases
+   * cannot drift apart later. The reason is recorded but never returned —
+   * operators need to tell them apart, callers must not (§12.1).
+   */
+  private rejectLogin(email: string): never {
+    this.logger.warn({ event: 'auth.login.failed', email }, 'Login attempt rejected')
+    throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE)
   }
 
   /** Always succeeds, by design: a logout button must never fail (PRD-001a §9). */
