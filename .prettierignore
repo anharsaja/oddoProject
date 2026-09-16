@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.next/
+coverage/
+pnpm-lock.yaml
+**/prisma/migrations/
+
+# Markdown is owned by the Mentor session (docs/**, CLAUDE.md). Formatting it
+# here would rewrite documents this session is not allowed to touch.
+**/*.md

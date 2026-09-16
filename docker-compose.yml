@@ -1,0 +1,45 @@
+name: oddo
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: oddo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: oddo
+      POSTGRES_PASSWORD: oddo
+      POSTGRES_DB: oddo_dev
+    ports:
+      # Host port 5433 on purpose: developers commonly already run a Postgres
+      # on 5432, and a silent port clash is a miserable thing to debug.
+      - '5433:5432'
+    volumes:
+      - oddo-pgdata:/var/lib/postgresql/data
+      # The official image runs everything in this folder exactly once, when the
+      # data volume is first created. That is where oddo_test comes from.
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U oddo -d oddo_dev']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: oddo-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - oddo-redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  oddo-pgdata:
+  oddo-redisdata:

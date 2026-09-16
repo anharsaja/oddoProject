@@ -122,11 +122,26 @@ Rincian dan alasannya ada di `docs/adr/ADR-0002-arsitektur-inti.md`.
 
 ## Perintah penting
 
-Belum ada — diisi oleh sesi Coder setelah **PRD-000** selesai. Daftar script yang wajib
-dibuat ada di `docs/prd/PRD-000-project-scaffolding.md` bagian 13.
+Diisi oleh sesi Coder saat **PRD-000** selesai. Semua perintah dijalankan dari root repo.
+Package manager: **pnpm 9.15.4** lewat corepack (lihat `README.md` §1 kalau `corepack enable`
+gagal EPERM di Windows).
 
-- Install: _TBD (PRD-000)_
-- Dev: _TBD (PRD-000)_
-- Test: _TBD (PRD-000)_
-- Lint: _TBD (PRD-000)_
-- Migrasi: _TBD (PRD-000)_
+| Keperluan | Perintah |
+|---|---|
+| Install | `pnpm install` |
+| Siapkan env | salin `.env.example` → `.env` |
+| Nyalakan DB & Redis | `pnpm docker:up` (menunggu healthcheck hijau) |
+| Matikan | `pnpm docker:down` · hapus volume: `pnpm docker:reset` |
+| Dev server | `pnpm dev` (api :3001, web :3000) |
+| Build | `pnpm build` |
+| Test | `pnpm test` (butuh Docker jalan; memakai database `oddo_test`) |
+| Lint | `pnpm lint` (`--max-warnings=0`) |
+| Typecheck | `pnpm typecheck` |
+| Format | `pnpm format` / `pnpm format:check` |
+| Migrasi | `pnpm db:migrate` |
+| Seed | `pnpm db:seed` |
+| Prisma Studio | `pnpm db:studio` |
+| Reset DB dev | `pnpm db:reset` (menghapus isi `oddo_dev`, lalu migrasi + seed ulang) |
+
+Filter per package memakai nama lengkap yang ber-scope, mis.
+`pnpm --filter @oddo/api test` — `--filter api` tidak akan cocok.

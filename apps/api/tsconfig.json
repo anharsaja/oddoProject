@@ -1,0 +1,16 @@
+{
+  "extends": "@oddo/config/tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "dist",
+    "baseUrl": ".",
+    "types": ["node", "jest"],
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strictPropertyInitialization": false,
+    "declaration": false,
+    "sourceMap": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "prisma/**/*.ts"]
+}

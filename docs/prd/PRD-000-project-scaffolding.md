@@ -1,7 +1,7 @@
 ---
 id: PRD-000
 title: Project scaffolding — monorepo, Docker, Prisma, health check
-status: ready
+status: review
 priority: P0
 modules: [infra]
 depends_on: []
@@ -794,10 +794,228 @@ Docker CLI, dan menghentikan container akan mengganggu test lain yang berjalan b
 
 **Ringkasan yang dikerjakan:**
 
+Seluruh bagian 13 (langkah 1–16) dikerjakan. Monorepo pnpm berisi `@oddo/api` (NestJS),
+`@oddo/web` (Next.js), `@oddo/shared`, dan `@oddo/config`; PostgreSQL 16 + Redis 7 lewat
+Docker dengan healthcheck dan script init yang membuat `oddo_dev` **dan** `oddo_test`;
+Prisma tersambung dengan dua file migrasi yang di-commit dan seed sistem yang idempotent;
+endpoint `GET /api/health` yang memeriksa database dan Redis sungguhan dengan timeout 2 detik;
+serta halaman web yang menampilkan hasilnya lengkap dengan loading, degraded, dan error state.
+
+Pendekatan yang perlu diketahui Mentor:
+
+1. **Wiring aplikasi dipisah ke `src/app.setup.ts`** (fungsi `configureApp`). `main.ts` dan
+   seluruh integration test memakai fungsi yang sama, sehingga filter/pipe/interceptor yang
+   diuji benar-benar sama dengan yang dipakai production. Filter yang hanya dipasang di
+   `main.ts` adalah filter yang tidak pernah dilihat test.
+2. **Request id lahir di satu tempat**, yaitu hook `genReqId` milik pino-http — karena itu
+   middleware, ia juga berjalan untuk request yang tidak cocok ke route mana pun (404).
+   `RequestIdInterceptor` memakai ulang nilai itu, mengisi `RequestContext`
+   (AsyncLocalStorage), dan mencerminkannya ke response header.
+3. **Health sengaja membaca satu baris nyata** (`system_setting.key = 'app.version'`), bukan
+   `SELECT 1`. Koneksi TCP yang terbuka tidak membuktikan migrasi sudah jalan atau Prisma
+   client cocok dengan skema — dan justru itu kegagalan yang benar-benar terjadi.
+4. **`@oddo/shared` di-build ke `dist/`** dan script root menjalankan `build:shared` sebelum
+   `typecheck`/`test`/`build`. Itulah yang membuat AC-000-07 (b) bekerja: mengubah sumber
+   tipe langsung terasa di kedua aplikasi tanpa langkah manual.
+
+---
+
 **File yang dibuat/diubah:**
 
-**Deviasi dari PRD (kalau ada) + alasannya:**
+*Root & workspace*
+
+| Path | Peran |
+|---|---|
+| `package.json` | Script orkestrasi root, `packageManager: pnpm@9.15.4` |
+| `pnpm-workspace.yaml` | Mendaftarkan `apps/*` dan `packages/*` |
+| `eslint.config.mjs` | Flat config seluruh workspace; satu-satunya tempat `pnpm lint` berjalan |
+| `prettier.config.mjs`, `.prettierignore` | Prettier; `**/*.md` diabaikan agar dokumen milik Mentor tidak ikut diformat |
+| `.gitignore`, `.gitattributes` | `.env` diabaikan, `prisma/migrations` tidak; `*.sh` dipaksa LF supaya script init jalan di container |
+| `.env.example`, `.env.test` | Satu file env di root untuk api **dan** web |
+| `docker-compose.yml` | Postgres 16 (host **5433**) + Redis 7, keduanya dengan healthcheck |
+| `docker/postgres/init/01-create-databases.sh` | Membuat `oddo_test` saat volume pertama dibuat |
+| `README.md` | Setup dari nol, daftar perintah, troubleshooting |
+| `CLAUDE.md` | Bagian "Perintah penting" diisi (hanya bagian itu yang disentuh) |
+
+*`packages/`*
+
+| Path | Peran |
+|---|---|
+| `packages/config/tsconfig.base.json` | TS strict penuh (termasuk `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`) |
+| `packages/config/eslint.base.mjs` | Aturan bersama + zona `import/no-restricted-paths` (`packages/**` dilarang mengimpor `apps/**`) + larangan `console` di kode aplikasi |
+| `packages/config/prettier.config.mjs` | Gaya kode bersama |
+| `packages/shared/src/health.ts` | `HealthResponse`, `HealthCheckResult`, `HealthStatus`, `DependencyStatus` |
+| `packages/shared/src/error-code.ts` | Enum `ErrorCode` (ADR-0001 B8) |
+
+*`apps/api/`*
+
+| Path | Peran |
+|---|---|
+| `src/main.ts` | Bootstrap; memvalidasi env sebelum Nest dibangun |
+| `src/app.module.ts`, `src/app.setup.ts` | Modul root dan wiring bersama (prefix `/api`, pipe, filter, interceptor, CORS) |
+| `src/config/env.schema.ts` | Skema zod + `EnvValidationError` + formatter laporan |
+| `src/config/env.ts` | Memuat `.env` root, cache, `loadEnvOrExit()` |
+| `src/config/env.module.ts` | Token DI `ENV` (global) |
+| `src/config/check-env.ts` | Gerbang env berdiri sendiri untuk `pnpm dev` (lihat deviasi D-2) |
+| `src/common/request-id.ts` | `resolveRequestId()` — hormati `X-Request-Id`, kalau tidak ada buat UUID v7 |
+| `src/common/context/request-context.ts` | `RequestContext` berbasis AsyncLocalStorage |
+| `src/common/interceptors/request-id.interceptor.ts` | Mengisi context + header response |
+| `src/common/filters/all-exceptions.filter.ts` | Satu-satunya perakit body error (ADR-0001 B8) |
+| `src/common/validation/validation-exception.factory.ts` | Menerjemahkan class-validator ke `details[]` |
+| `src/common/api-error.ts` | Kontrak `ApiErrorResponse` + pemetaan status ke `ErrorCode` |
+| `src/common/logging/logger.options.ts` | Opsi pino; redact cookie/authorization; `genReqId` |
+| `src/common/prisma/*` | `PrismaService` (pesan koneksi yang jelas, disconnect rapi) + modul global |
+| `src/common/redis/*` | `RedisService` (ping, teardown deterministik) + modul global |
+| `src/common/with-timeout.ts` | `withTimeout()` + `describeError()` |
+| `src/common/decorators/public.decorator.ts` | `@Public()` — disiapkan untuk guard PRD-001 |
+| `src/health/health.status.ts` | Fungsi murni `resolveOverallStatus()` (ok vs degraded) |
+| `src/health/health.service.ts` | Probe database & Redis, masing-masing bertimeout 2 detik |
+| `src/health/health.controller.ts` | 200/503 ditulis langsung ke response, bukan lewat exception |
+| `prisma/schema.prisma` | Model `SystemSetting` + catatan konvensi Decimal/Timestamptz |
+| `prisma/migrations/20260916062502_init_system_setting/` | Tabel `system_setting` |
+| `prisma/migrations/20260916063000_system_setting_key_not_empty/` | CHECK `key` tidak boleh kosong (ditulis tangan) |
+| `prisma/seed/system.ts`, `index.ts`, `demo.ts` | Seed sistem idempotent; seed demo masih kerangka |
+| `jest.config.ts`, `test/*.ts` | Jest + `.env.test` + `migrate deploy` ke `oddo_test` + TRUNCATE per file |
+| `src/**/*.spec.ts`, `test/**/*.spec.ts` | 30 test (unit + integration + guard) |
+
+*`apps/web/`*
+
+| Path | Peran |
+|---|---|
+| `next.config.ts` | Memuat `.env` root, gagal keras kalau `NEXT_PUBLIC_API_URL` kosong |
+| `tailwind.config.ts`, `src/app/globals.css` | Token warna secukupnya untuk 4 komponen shadcn |
+| `src/lib/config.ts` | **Satu-satunya** pembaca `NEXT_PUBLIC_API_URL` |
+| `src/lib/utils.ts` | `cn()` |
+| `src/components/ui/{card,badge,button,skeleton}.tsx` | Komponen shadcn/ui yang dipasang |
+| `src/components/health-dashboard.tsx` | Loading / sehat / degraded / tidak terjangkau + tombol muat ulang |
+| `src/app/layout.tsx`, `src/app/page.tsx` | Halaman root, tanpa layout shell (sengaja) |
+| `vitest.config.ts`, `test/*` | Vitest + Testing Library, 6 test |
+
+---
+
+**Bukti Acceptance Criteria:**
+
+| AC | Terpenuhi? | Bukti |
+|---|---|---|
+| AC-000-01 Setup dari nol | ya | Urutan `docker:reset` → `docker:up` → `db:migrate` → `db:seed` dijalankan **3x** dari volume kosong, ketiganya exit 0 (14 s, 14 s, dan iterasi ke-3 dilanjut `pnpm dev`). Iterasi 3: api dan web keduanya HTTP 200 dalam 2 detik; `GET /api/health` mengembalikan `status: ok` dengan database dan redis `up`. Tidak ada race karena `docker:up` memakai `--wait` |
+| AC-000-02 Health sehat | ya | `test/health.spec.ts` — "answers 200 with both dependencies up". Bahwa `version` benar-benar dari DB dibuktikan test "reads version from system_setting instead of hardcoding it": baris diubah jadi `9.9.9-from-database`, response ikut berubah |
+| AC-000-03 Dependency mati | ya | (a) `test/health-degraded.spec.ts` 4 test: 503 + `degraded`, `redis.status=down` dengan `error` non-kosong, `database` tetap `up`, body **tidak** punya field `code`/`statusCode`/`details`, dan request kedua tetap dilayani. (b) manual: `docker compose stop redis` memberi 503 `degraded` dengan error `Stream isn't writeable and enableOfflineQueue options is false`; setelah `docker compose start redis` kembali 200 sendiri |
+| AC-000-04 Environment tidak valid | ya | `DATABASE_URL` dihapus dari `.env`, lalu `pnpm --filter @oddo/api dev` memberi **exit code 1 dalam 2 detik**, stdout memuat `- DATABASE_URL: is missing`, dan curl ke port 3001 mengembalikan `000` (tidak ada yang mendengarkan) |
+| AC-000-05 Bentuk error seragam | ya | `test/error-envelope.spec.ts` — `Object.keys(body).sort()` dicocokkan persis ke `[code, details, message, requestId, statusCode, timestamp]`, `code = NOT_FOUND`, `message = Cannot GET /api/tidak-ada`. Dicek manual juga lewat curl |
+| AC-000-06 Field tak dikenal | ya | `test/error-envelope.spec.ts` — controller khusus test `ValidationProbeController` (hanya hidup di file test); body `{name:'a', unknownField:1}` memberi 400 `VALIDATION_ERROR` dan `details` memuat `field: unknownField` |
+| AC-000-07 Tipe dipakai bersama | ya | (a) `test/shared-types.guard.spec.ts` memindai `apps/**`. Guard-nya sendiri **diuji bisa gagal**: file berisi `interface HealthResponse` ditaruh sengaja, test merah dan menyebut path-nya; dihapus, hijau lagi. (b) prosedur manual dijalankan, keluarannya ditempel di bawah |
+| AC-000-08 Seed idempotent | ya | `pnpm db:seed` dijalankan dua kali; `count(*)` **dan** md5 seluruh isi tabel identik (`2 rows / 42a97fba4383cce20abaea798e14614e`) |
+| AC-000-09 Pagar kualitas | ya | `pnpm lint` (`--max-warnings=0`), `pnpm typecheck`, `pnpm test` semuanya exit 0. Laporan test: `Tests: 30 passed, 30 total` (api) + `Test Files 1 passed`, 6 test (web) — **0 skipped, 0 todo**. Tidak ada satu pun `eslint-disable` di seluruh repo. Bahwa lint benar-benar memindai `.tsx` dibuktikan dengan menyisipkan variabel tak terpakai di `page.tsx` sampai lint merah |
+| AC-000-10 Migrasi tercatat | ya | `git check-ignore` atas `migration.sql` menunjukkan file tidak diabaikan. `pnpm db:reset` (atas persetujuan owner) exit 0: kedua migrasi ter-apply ulang, CHECK constraint ikut terbentuk, seed jalan lagi |
+| AC-000-11 Backend mati | ya | `test/health-dashboard.test.tsx` — "reports an unreachable API with its URL and a retry button": pesan memuat nilai `API_URL` apa adanya dan tombol "Coba lagi" ada. Manual: API dimatikan, `http://localhost:3000` tetap HTTP 200 tanpa stack trace; bundle klien yang terkirim memuat pesan itu beserta `http://localhost:3001/api` |
+| AC-000-12 Test terpisah dari dev | ya | `oddo_dev` di-hash sebelum dan sesudah seluruh test: `2 rows / 42a97fba...` identik. `pnpm test` dijalankan dua kali berturut-turut, keduanya exit 0 (20 detik) tanpa pembersihan manual |
+
+**Keluaran AC-000-07 (b)** — field `checks` diubah jadi `checksRenamed` di
+`packages/shared/src/health.ts`, lalu `pnpm typecheck`. Error muncul dari **kedua** aplikasi:
+
+```
+> @oddo/web@0.1.0 typecheck E:\Project\oddoProject\apps\web
+src/components/health-dashboard.tsx(106,67): error TS2339: Property 'checks' does not exist on type 'HealthResponse'.
+src/components/health-dashboard.tsx(107,64): error TS2339: Property 'checks' does not exist on type 'HealthResponse'.
+test/health-dashboard.test.tsx(14,5): error TS2353: Object literal may only specify known properties, and 'checks' does not exist in type 'HealthResponse'.
+test/health-dashboard.test.tsx(78,9): error TS2353: Object literal may only specify known properties, and 'checks' does not exist in type 'Partial<HealthResponse>'.
+
+> @oddo/api@0.1.0 typecheck E:\Project\oddoProject\apps\api
+src/health/health.service.ts(47,7): error TS2353: Object literal may only specify known properties, and 'checks' does not exist in type 'HealthResponse'.
+test/health-degraded.spec.ts(47,17): error TS2339: Property 'checks' does not exist on type 'HealthResponse'.
+test/health-degraded.spec.ts(48,24): error TS2339: Property 'checks' does not exist on type 'HealthResponse'.
+test/health.spec.ts(39,17): error TS2339: Property 'checks' does not exist on type 'HealthResponse'.
+test/health.spec.ts(40,17): error TS2339: Property 'checks' does not exist on type 'HealthResponse'.
+... 18 error seluruhnya, semuanya akibat satu rename
+
+ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @oddo/web@0.1.0 typecheck: `tsc -p tsconfig.json --noEmit`
+ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @oddo/api@0.1.0 typecheck: `tsc -p tsconfig.json --noEmit`
+```
+
+Setelah rename dikembalikan: `pnpm typecheck` memberi **exit code 0**.
+
+---
+
+**Deviasi dari PRD + alasannya:**
+
+| # | Deviasi | Alasan | Dampak |
+|---|---|---|---|
+| D-1 | `.env.test` memakai `NODE_ENV=test`, bukan `development` | §13 langkah 6 menyebut isinya sama dengan `.env.example` kecuali `DATABASE_URL` dan `REDIS_URL`. Diturut harfiah, `NODE_ENV` akan bernilai `development` saat test — itu menyalakan transport pino-pretty di dalam test dan membuat lingkungan test berbohong tentang dirinya sendiri | Tidak ada AC yang terpengaruh. `LOG_LEVEL` tetap `debug` persis seperti PRD |
+| D-2 | `pnpm --filter @oddo/api dev` sekarang `run-s check:env dev:watch`, bukan langsung `nest start --watch` | AC-000-04 menuntut proses **keluar** dengan exit code bukan 0. `nest start --watch` tidak pernah keluar — itu memang sifat watcher: aplikasinya mati, watcher-nya tetap hidup (terbukti: harus dibunuh timeout, exit 124). Validasi env dijalankan lebih dulu sebagai proses terpisah | AC-000-04 terpenuhi (exit 1 dalam 2 detik) **dan** hot reload tetap jalan saat env valid |
+| D-3 | Ditambahkan script `pnpm docker:reset` | Alias eksplisit untuk `docker compose down -v`. Bentuk `pnpm docker:down -v` yang ditulis PRD **juga diuji dan berfungsi** (flag diteruskan pnpm) — keduanya didokumentasikan di README | Tidak ada; murni tambahan kenyamanan |
+| D-4 | Migrasi jadi **dua** file, bukan satu | CHECK constraint "key tidak boleh kosong" (§7.2) tidak bisa diekspresikan di `schema.prisma`. Menempelkannya ke migrasi pertama yang sudah ter-apply akan mengubah checksum-nya. ADR-0001 B10 sendiri mengizinkan satu PRD menghasilkan lebih dari satu migrasi | Tidak ada; `db:reset` membangun keduanya dari nol dengan benar |
+| D-5 | `ApiErrorResponse` disimpan di `apps/api/src/common/api-error.ts`, bukan di `@oddo/shared` | §13 langkah 3 hanya menyebut tiga hal untuk `@oddo/shared`: `HealthResponse`, `HealthCheckResult`, `ErrorCode`. Web belum mengonsumsi bentuk error di PRD ini | Perlu dipindah ke `@oddo/shared` di PRD-001 saat frontend mulai menangani error |
+| D-6 | `version` bernilai `unknown` kalau database tidak bisa dibaca | PRD tidak menentukan nilainya saat database `down` (contoh 503 di §9 memakai database yang masih `up`) | Ditutup test; mudah diubah kalau Mentor mau nilai lain |
+| D-7 | Baris seed `app.version` yang hilang dihitung sebagai `database: down` | Pemeriksaan ini ada untuk membuktikan rantai migrasi → seed → Prisma hidup; kalau seed belum jalan, rantai itu putus. Sejalan dengan edge case §11 no. 3 | Ditutup test "reports the database as down when the seed row is missing" |
+
+**Tidak ada TODO, mock, atau stub yang tersisa.** `prisma/seed/demo.ts` memang kosong —
+itu diminta eksplisit oleh §13 langkah 9 ("kosong, hanya kerangka").
+
+**Dependency yang ditambahkan** (tidak disebut per-nama di PRD/ADR, jadi dilaporkan di sini):
+`nestjs-pino` + `pino-http` + `pino-pretty` (jalur baku memasang pino di NestJS),
+`ioredis` (klien Redis), `uuid` (UUID v7, ADR-0001 B3), `dotenv` dan `dotenv-cli` (satu `.env`
+di root dibaca oleh api, web, dan Prisma CLI), `npm-run-all2` (`run-s`/`run-p`, diminta
+§2.3 sebagai pengganti `&&` di script npm), `class-validator` dan `class-transformer`
+(ADR-0001 B6), serta `tailwindcss-animate`, `class-variance-authority`, `clsx`,
+`tailwind-merge`, `@radix-ui/react-slot` (prasyarat komponen shadcn/ui).
+
+---
 
 **Hal yang perlu diputuskan Mentor untuk PRD berikutnya:**
 
+1. **`ApiErrorResponse` pindah ke `@oddo/shared`?** (lihat D-5). Begitu layar login PRD-001
+   harus membaca `code` dari response error, tipe itu jadi kontrak dua sisi.
+2. **Access log untuk path di luar `/api`.** NestJS menempelkan global prefix ke path
+   middleware, sehingga middleware logger meng-cover `/api/**` — seluruh permukaan aplikasi —
+   tapi request ke `/` atau `/favicon.ico` tidak menghasilkan baris log. Perlu diputuskan
+   apakah itu diterima, atau logger harus dipasang manual di luar prefix.
+3. **`LOG_LEVEL` di `.env.test`.** PRD menetapkan `debug`, jadi keluaran `pnpm test` penuh JSON
+   log mentah. Kalau Mentor setuju, `warn` akan membuat kegagalan test jauh lebih mudah dibaca.
+4. **Prisma 7 menghapus `package.json#prisma`.** Sekarang muncul warning deprecation di setiap
+   perintah Prisma; suatu saat perlu pindah ke `prisma.config.ts`. Bukan urgensi PRD ini.
+5. **Zona `import/no-restricted-paths` antar modul.** §13 langkah 2 hanya meminta zona
+   `packages/**` dilarang mengimpor `apps/**`, dan itu yang dipasang. Aturan modul ADR-0002 §1
+   (`core` tidak boleh ke `inventory`/`sales`, `inventory` tidak boleh ke `sales`) belum bisa
+   dipasang karena foldernya belum ada — layak dimasukkan ke PRD-002.
+6. **Plugin ESLint React/Next belum dipasang** (`react-hooks`, `@next/eslint-plugin-next`).
+   Di luar cakupan PRD ini; jadi relevan begitu jumlah halaman bertambah.
+7. **E2E Playwright** sudah dijadwalkan PRD-001 dan memang belum ada di sini. Konsekuensinya:
+   bukti AC-000-11 di level browser bersandar pada test komponen, bukan browser sungguhan.
+
+---
+
 **Cara menjalankan & menguji:**
+
+```bash
+# sekali saja
+corepack enable                 # Windows EPERM? lihat README bagian 1
+pnpm install
+cp .env.example .env            # PowerShell: Copy-Item .env.example .env
+
+# menyalakan
+pnpm docker:up                  # menunggu healthcheck Postgres & Redis hijau
+pnpm db:migrate
+pnpm db:seed
+pnpm dev                        # api :3001, web :3000
+```
+
+Buka http://localhost:3000 — Database dan Redis dua-duanya harus **up**.
+
+```bash
+# gerbang kualitas (keempatnya harus exit 0)
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+
+# pemeriksaan manual
+curl http://localhost:3001/api/health            # 200, status ok
+curl http://localhost:3001/api/tidak-ada         # 404 bentuk standar
+docker compose stop redis
+curl http://localhost:3001/api/health            # 503 degraded
+docker compose start redis                       # pulih sendiri
+
+# environment tidak valid
+# hapus baris DATABASE_URL dari .env, lalu:
+pnpm --filter @oddo/api dev                      # exit 1 dalam ~2 detik
+```

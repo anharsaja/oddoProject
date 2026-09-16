@@ -1,0 +1,35 @@
+// Oddo ERP — database schema
+//
+// Conventions that bind every model added from here on (ADR-0001):
+//   B3  ids are UUID v7 generated in the application layer, never by the
+//       database — so a parent and its children can be built in one round trip
+//   B4  money  -> Decimal @db.Decimal(18, 4)
+//       amounts/quantities -> Decimal @db.Decimal(18, 6)
+//       never Float, anywhere, for either
+//   B5  every point in time -> DateTime @db.Timestamptz(6), stored in UTC
+//
+// Business tables additionally carry the base fields of ADR-0002 §4
+// (company_id, created_by, updated_by, active). `system_setting` below is not
+// a business table and deliberately has none of them — see PRD-000 §7.2.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Instance-level configuration. Managed by seeds and migrations, not by users
+/// through a screen, and referenced by no document.
+model SystemSetting {
+  id          String   @id @db.Uuid
+  key         String   @unique @db.VarChar(100)
+  value       Json     @db.JsonB
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("system_setting")
+}

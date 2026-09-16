@@ -1,0 +1,45 @@
+{
+  "name": "oddo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Oddo — modular monolith ERP (Odoo-inspired)",
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "run-s build:shared dev:apps",
+    "dev:apps": "run-p dev:api dev:web",
+    "dev:api": "pnpm --filter @oddo/api dev",
+    "dev:web": "pnpm --filter @oddo/web dev",
+    "build": "run-s build:shared build:api build:web",
+    "build:shared": "pnpm --filter @oddo/shared build",
+    "build:api": "pnpm --filter @oddo/api build",
+    "build:web": "pnpm --filter @oddo/web build",
+    "test": "run-s build:shared test:api test:web",
+    "test:api": "pnpm --filter @oddo/api test",
+    "test:web": "pnpm --filter @oddo/web test",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "run-s build:shared typecheck:all",
+    "typecheck:all": "run-p --continue-on-error typecheck:shared typecheck:api typecheck:web",
+    "typecheck:shared": "pnpm --filter @oddo/shared typecheck",
+    "typecheck:api": "pnpm --filter @oddo/api typecheck",
+    "typecheck:web": "pnpm --filter @oddo/web typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:migrate": "pnpm --filter @oddo/api db:migrate",
+    "db:seed": "pnpm --filter @oddo/api db:seed",
+    "db:studio": "pnpm --filter @oddo/api db:studio",
+    "db:reset": "pnpm --filter @oddo/api db:reset",
+    "docker:up": "docker compose up -d --wait",
+    "docker:down": "docker compose down",
+    "docker:reset": "docker compose down -v"
+  },
+  "devDependencies": {
+    "@oddo/config": "workspace:*",
+    "eslint": "^9.17.0",
+    "npm-run-all2": "^7.0.2",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2"
+  }
+}
