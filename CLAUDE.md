@@ -4,12 +4,14 @@ Membangun aplikasi web ERP bergaya **Odoo**: satu platform dengan banyak modul b
 (CRM, Sales, Inventory, Purchase, Accounting, HR, dst.) yang saling terhubung di atas
 data model dan sistem hak akses yang sama.
 
-> **Brief induk: `perintah-awal.md`** — ditulis oleh owner project, berisi target-state,
+> **Brief induk: `first-step.md`** — ditulis oleh owner project, berisi target-state,
 > cakupan modul, prinsip arsitektur, stack, dan aturan kerja. Dokumen apa pun yang
 > bertentangan dengannya kalah, kecuali owner memutuskan lain secara eksplisit.
 >
-> Status project: **fase perancangan (PHASE 1 — Discovery)**.
-> Selama belum ada PRD/work package berstatus siap, JANGAN menulis kode aplikasi.
+> Status project: **PHASE 1 — Discovery SELESAI (2026-09-16)**. Fase Fondasi F1–F3 beres;
+> hasilnya di `docs/PRODUCT-SCOPE.md` dan `docs/adr/`.
+> Sesi Coder hanya boleh menulis kode untuk PRD yang berstatus `ready` di
+> `docs/prd/README.md`. Di luar itu, JANGAN menulis kode aplikasi.
 
 ---
 
@@ -48,15 +50,19 @@ CLAUDE.md                  ← file ini (konteks bersama kedua sesi)
   mentor.md                ← prompt sesi Mentor
   coder.md                 ← prompt sesi Coder
 docs/
+  PRODUCT-SCOPE.md         ← ruang lingkup + 12 keputusan FROZEN + roadmap PRD
   prd/
     README.md              ← PAPAN STATUS semua PRD (sumber kebenaran progres)
     _TEMPLATE.md           ← template PRD
-    PRD-001-*.md           ← satu file = satu unit kerja
+    PRD-000-*.md           ← satu file = satu unit kerja
   adr/
     _TEMPLATE.md           ← template Architecture Decision Record
     ADR-0001-*.md          ← keputusan teknis yang mengikat kedua sesi
   learning/                ← catatan penjelasan dari Mentor (materi belajar)
 ```
+
+**Urutan baca untuk sesi mana pun:** `CLAUDE.md` → `docs/PRODUCT-SCOPE.md` →
+seluruh `docs/adr/*.md` → `docs/prd/README.md` → PRD yang sedang dikerjakan.
 
 ## Konvensi
 
@@ -70,7 +76,7 @@ docs/
 
 ## Stack
 
-Ditetapkan owner di `perintah-awal.md` §16. **Jangan diubah tanpa persetujuan eksplisit owner**;
+Ditetapkan owner di `first-step.md` §16. **Jangan diubah tanpa persetujuan eksplisit owner**;
 kalau ada alasan kuat, ajukan sebagai ADR + trade-off, jangan diputuskan sepihak.
 
 | Lapis | Pilihan |
@@ -85,15 +91,42 @@ kalau ada alasan kuat, ajukan sebagai ADR + trade-off, jangan diputuskan sepihak
 | Testing | Unit + Integration + E2E |
 | Arsitektur | **Modular Monolith** (bukan microservices), disiapkan agar modul bisa dipisah nanti |
 
+Pilihan turunan yang **tidak** disebut owner (package manager, id, tipe uang, format error,
+auth, test runner, migrasi) diputuskan di `docs/adr/ADR-0001-tech-stack.md` — itu yang mengikat.
+
+| Turunan | Keputusan | Rujukan |
+|---|---|---|
+| Package manager & repo | pnpm workspace: `apps/api`, `apps/web`, `packages/shared`, `packages/config` | ADR-0001 B1 |
+| Auth | Session di Redis + httpOnly cookie, password argon2id | ADR-0001 B2 |
+| Primary key | UUID v7, dibangkitkan di application layer | ADR-0001 B3 |
+| Uang & kuantitas | `Decimal` / `NUMERIC`. **Tidak pernah** `float` | ADR-0001 B4 |
+| Waktu | `TIMESTAMPTZ` UTC, tampil Asia/Jakarta | ADR-0001 B5 |
+| Test | Jest di `apps/api`, Vitest di `apps/web`, integration pakai Postgres nyata | ADR-0001 B7 |
+
 Prinsip yang mengikat semua PRD: target-state boleh besar, tapi eksekusi bertahap
 (MVP → V1 → V2 → Future); jangan over-engineering; modul ERP harus terintegrasi
 (Sales → Delivery → Inventory → Invoice → Accounting → Payment), bukan aplikasi terpisah.
 
+## Aturan yang tidak boleh dilanggar PRD mana pun
+
+Rincian dan alasannya ada di `docs/adr/ADR-0002-arsitektur-inti.md`.
+
+1. Tidak ada query ke tabel bisnis tanpa `companyId`.
+2. Tidak ada endpoint tanpa `@RequirePermission` atau `@Public()`.
+3. Tidak ada transisi state di luar transaksi database.
+4. Tidak ada `DELETE` fisik pada dokumen yang pernah punya nomor final — pakai `active = false`.
+5. Tidak ada modul yang menulis ke tabel milik modul lain.
+6. Tidak ada `number`/`float` untuk uang atau kuantitas.
+7. Tidak ada perubahan skema tanpa file migrasi yang di-commit.
+8. Tidak ada stok yang berubah di luar `stock_move` (lihat `ADR-0003`).
+
 ## Perintah penting
 
-Diisi setelah project di-scaffold (install, dev server, test, lint, migrasi).
+Belum ada — diisi oleh sesi Coder setelah **PRD-000** selesai. Daftar script yang wajib
+dibuat ada di `docs/prd/PRD-000-project-scaffolding.md` bagian 13.
 
-- Install: _TBD_
-- Dev: _TBD_
-- Test: _TBD_
-- Lint: _TBD_
+- Install: _TBD (PRD-000)_
+- Dev: _TBD (PRD-000)_
+- Test: _TBD (PRD-000)_
+- Lint: _TBD (PRD-000)_
+- Migrasi: _TBD (PRD-000)_

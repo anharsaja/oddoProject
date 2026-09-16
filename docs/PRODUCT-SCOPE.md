@@ -1,0 +1,167 @@
+# PRODUCT SCOPE — Oddo ERP
+
+```
+Status   : APPROVED
+Tanggal  : 2026-09-16
+Disetujui: owner (via Discovery batch 1–3)
+```
+
+> Dokumen ini adalah hasil **PHASE 1 — Discovery**. Keputusan di bagian 2 berstatus
+> **FROZEN**: tidak diubah tanpa persetujuan eksplisit owner. Kalau ada PRD atau ADR
+> yang bertentangan dengan dokumen ini, yang salah adalah PRD/ADR-nya.
+
+---
+
+## 1. Apa yang dibangun
+
+**Aplikasi ERP internal** — satu platform, banyak modul bisnis yang saling terhubung
+di atas data model dan sistem hak akses yang sama.
+
+**Bukan** marketing website mirip odoo.com. **Bukan** juga platform dengan app store
+internal yang bisa pasang/lepas modul saat runtime — modularitas kita adalah modularitas
+*kode* (folder per modul, batas dependency yang tegas), bukan modularitas *runtime*.
+
+**Tujuan berlapis:**
+
+1. training project & pembelajaran arsitektur software
+2. prototype yang bisa dikembangkan untuk perusahaan
+3. fondasi ERP internal jangka panjang
+
+**Domain model pertama: trading / distribusi.** Beli barang jadi → simpan di gudang →
+jual lagi. Punya produk fisik, stok, gudang, customer, dan vendor.
+
+---
+
+## 2. Keputusan yang dibekukan
+
+| # | Topik | Keputusan | Konsekuensi yang mengikat semua PRD |
+|---|---|---|---|
+| D-01 | Domain | Trading / distribusi | Produk fisik + gudang jadi warga kelas satu |
+| D-02 | Urutan MVP | Core → Inventory → Sales | Purchase ditunda ke V1; stok awal via Inventory Adjustment |
+| D-03 | Multi-company | Ready, UI single | `company_id NOT NULL` di semua tabel bisnis + record rule sejak PRD-001. Tanpa company switcher |
+| D-04 | Permission | RBAC string + record rule company | Format `modul.objek.aksi`. Role = kumpulan permission. Guard cek permission **dan** company |
+| D-05 | Model stok | Double-entry + lokasi | Setiap stock move punya location asal & tujuan, termasuk lokasi virtual. Lihat `ADR-0003` |
+| D-06 | Model produk | Sederhana + multi-UoM | `type` (stockable/consumable/service), kategori, konversi UoM dalam satu kategori. **Tanpa** lot/serial, **tanpa** varian |
+| D-07 | Currency | IDR saja, struktur currency-ready | Tabel `currency` + `exchange_rate` ada; dokumen simpan `currency_id` + `rate`. Sekarang selalu IDR rate 1. UI tidak menampilkan pilihan |
+| D-08 | Pajak | Masuk MVP, tax-exclusive | Harga satuan belum termasuk PPN. Tarif disimpan sebagai data, bukan angka hardcoded |
+| D-09 | PRD pertama | PRD-000 scaffolding terpisah | Nol business logic di PRD-000 |
+| D-10 | Repo | pnpm workspace sederhana | `apps/api`, `apps/web`, `packages/shared`. Tanpa Nx/Turborepo |
+| D-11 | Auth | Session di Redis + httpOnly cookie | Password argon2id. Pencabutan akses berlaku seketika |
+| D-12 | Struktur org | Company + Warehouse saja | Branch, Department, Job Position, Employee ditunda ke modul HR (V1/V2) |
+
+---
+
+## 3. Peta modul per tahap
+
+### MVP — P0 & P1
+
+| Modul | Cakupan | Sengaja tidak termasuk |
+|---|---|---|
+| **Core — Platform** | Auth & session, User, Company, Role & Permission, Audit Log, Sequence, System Settings | Notification, Attachment, Automation, SSO |
+| **Core — Master data** | Partner (customer + vendor dalam satu tabel), Product, Product Category, UoM + konversi, Tax, Currency (IDR) | Price list, Payment term, Varian produk |
+| **Inventory** | Warehouse, Location (termasuk virtual), Stock Move, Stock Quant (on-hand), Opening stock via Adjustment, Internal transfer | Lot/serial, expiry, valuation & costing, reorder rule, multi-step routing |
+| **Sales** | Quotation → Sales Order, order line, diskon, pajak, Delivery Order + reservasi stok | Invoice, Payment, Return, Price list, approval berjenjang |
+
+### V1 — P2
+
+Purchase (RFQ → PO → Receipt → Vendor Bill) · Accounting dasar (Chart of Accounts,
+Journal Entry, Customer Invoice, Payment, AR/AP) · Inventory valuation & costing method ·
+Sales Return & Credit Note · CRM (Lead, Opportunity, Pipeline) · Reporting operasional ·
+Import/Export CSV · Notification in-app · Attachment
+
+### V2 — P3
+
+Multi-company penuh (switcher, data sharing, konsolidasi) · Multi-currency aktif +
+selisih kurs · Lot/batch, serial number, expiry (FEFO) · Varian produk · HR (Employee,
+Attendance, Leave, Expense) · Project & Timesheet · Approval workflow berjenjang ·
+Price list & payment term · Dashboard analitik
+
+### Future — P4
+
+Manufacturing (BoM, MO, Work Center, Scrap) · POS · Payment gateway · E-commerce ·
+Integrasi perbankan · Integrasi pajak/pemerintah *(REGULATORY VALIDATION REQUIRED)* ·
+Webhook & public API · Automation engine (trigger → condition → action) ·
+Document management dengan versioning
+
+---
+
+## 4. Roadmap PRD menuju MVP
+
+Setiap PRD adalah **vertical slice** (backend + UI secukupnya), dipersempit supaya
+muat satu sesi Coder. Alasannya ada di `ADR-0002` bagian "Batas satu PRD".
+
+| PRD | Judul | Prioritas | Depends on | Inti yang harus jadi |
+|---|---|---|---|---|
+| PRD-000 | Project scaffolding | P0 | — | Monorepo, Docker, Prisma, health check, test runner hijau |
+| PRD-001 | Auth & session | P0 | 000 | Login/logout, argon2id, session Redis, guard, `/me`, halaman login |
+| PRD-002 | Company, User, Role & Permission | P0 | 001 | RBAC, record rule company, audit log, layar Settings |
+| PRD-003 | Sequence, Currency, Tax | P0 | 002 | Penomoran dokumen aman dari race, tabel pajak & currency |
+| PRD-004 | Partner (customer & vendor) | P1 | 002 | Master partner + alamat + kontak, list & form |
+| PRD-005 | UoM, Product Category, Product | P1 | 002 | Produk + konversi UoM (dus ↔ pcs) |
+| PRD-006 | Inventory: warehouse, location, quant | P1 | 005 | Struktur gudang + lokasi virtual + on-hand |
+| PRD-007 | Inventory: stock move & adjustment | P1 | 006 | Double-entry move + opening stock + internal transfer |
+| PRD-008 | Sales: quotation → sales order | P1 | 004, 005, 003 | Dokumen penjualan lengkap dengan diskon & pajak |
+| PRD-009 | Delivery: reservasi → stock move | P1 | 007, 008 | Sambungan Sales ↔ Inventory. **Ini puncak MVP** |
+
+Urutan ini boleh bergeser kalau ada temuan saat implementasi, tapi **dependency-nya tidak boleh dilanggar**.
+
+---
+
+## 5. Definisi MVP selesai
+
+MVP dianggap selesai ketika skenario berikut bisa dijalankan dari awal sampai akhir
+di aplikasi yang berjalan, tanpa menyentuh database secara manual:
+
+```text
+ 1. Admin login, membuat company "PT Contoh" dan satu warehouse "WH Utama"
+ 2. Admin membuat dua user: Sales Staff dan Warehouse Staff, masing-masing dengan role
+ 3. Admin membuat produk "Kaos Polos": type stockable, UoM pcs,
+    dengan konversi 1 dus = 24 pcs
+ 4. Warehouse Staff memasukkan stok awal 240 pcs lewat Inventory Adjustment
+ 5. Sales Staff membuat Quotation untuk customer, 2 baris, diskon, PPN
+ 6. Sales Staff menekan Confirm
+       → nomor final terbit: SO/2026/0001
+       → Delivery Order otomatis terbentuk
+       → 240 pcs sebagian ter-reserve
+       → audit log tercatat
+ 7. Warehouse Staff mem-validate Delivery Order
+       → stock move WH/Stock → Customers tercatat
+       → on-hand turun sesuai jumlah yang dikirim
+ 8. Sales Staff mencoba menghapus Sales Order → ditolak 403 (tidak punya permission)
+ 9. User dari company lain membuka daftar Sales Order → SO di atas TIDAK muncul
+10. Admin membuka audit log → terlihat siapa yang confirm dan validate, kapan,
+    dari state apa ke state apa
+```
+
+Langkah 8, 9, dan 10 sama wajibnya dengan langkah 1–7. Kalau hanya jalur suksesnya
+yang jalan, MVP belum selesai.
+
+---
+
+## 6. Yang sengaja diparkir (belum diputuskan)
+
+Ini bukan kelupaan — ini ditunda sampai PRD yang membutuhkannya ditulis.
+Ditandai `DECISION REQUIRED` supaya tidak diputuskan diam-diam oleh sesi Coder.
+
+| # | Pertanyaan | Harus dijawab sebelum |
+|---|---|---|
+| Q-01 | Stok boleh minus atau tidak? Per warehouse atau global? | PRD-007 |
+| Q-02 | Costing method: FIFO / average / standard? | V1 (Inventory valuation) |
+| Q-03 | Tarif PPN default berapa, dan apakah satu produk bisa punya lebih dari satu pajak? *(REGULATORY VALIDATION REQUIRED)* | PRD-003 |
+| Q-04 | Format nomor dokumen final — `SO/2026/0001` atau ada kode cabang? | PRD-003 |
+| Q-05 | Sales Order boleh di-cancel setelah sebagian dikirim? Apa yang terjadi pada stock move-nya? | PRD-009 |
+| Q-06 | Partial delivery: satu SO boleh menghasilkan berapa Delivery Order? | PRD-009 |
+| Q-07 | Apakah dokumen dihapus permanen atau di-*archive* saja? | PRD-002 |
+| Q-08 | Berapa lama audit log disimpan? | V1 |
+
+---
+
+## 7. Prinsip yang mengikat
+
+1. **Target-state boleh besar, eksekusi bertahap.** Bagian 3 adalah peta jangka panjang,
+   bukan daftar kerja MVP.
+2. **Jangan over-engineering.** Modular monolith, bukan microservices. Tidak ada abstraksi
+   yang dibuat untuk kebutuhan yang belum ada.
+3. **Modul harus terintegrasi, bukan berdiri sendiri.** Sales → Delivery → Inventory adalah
+   satu rantai, bukan tiga aplikasi.
+4. **Yang belum diputuskan tidak ditebak.** Tandai `DECISION REQUIRED`, naikkan ke owner.
