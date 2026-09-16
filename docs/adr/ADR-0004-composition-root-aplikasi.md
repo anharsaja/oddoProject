@@ -112,6 +112,29 @@ Aturan memilih kanal: **butuh DI → Kanal 2. Tidak butuh DI → Kanal 1.**
 `AuthGuard` (PRD-001) dan `PermissionGuard` (PRD-002) masuk Kanal 2, didaftarkan di
 module pemiliknya, bukan di `app.setup.ts`.
 
+### Urutan eksekusi: guard berjalan SEBELUM interceptor
+
+Ditemukan saat PRD-001a dan dinaikkan jadi aturan karena setiap guard berikutnya akan
+menabraknya. Urutan NestJS untuk satu request adalah:
+
+```
+middleware → guard → interceptor (sebelum) → pipe → handler → interceptor (sesudah) → filter
+```
+
+Artinya `AuthGuard` berjalan **sebelum** `RequestIdInterceptor` membuka scope
+AsyncLocalStorage. Guard tidak bisa menulis ke `RequestContext` — saat ia berjalan,
+store-nya belum ada.
+
+**Polanya, dan ini mengikat `PermissionGuard` serta guard mana pun setelahnya:**
+guard menaruh hasilnya di **objek request** (`request.auth`), lalu interceptor-lah yang
+mengangkatnya ke `RequestContext`. Jangan dibalik, dan jangan membuat guard memanggil
+`RequestContext.run()` sendiri — scope-nya akan tertutup sebelum handler berjalan.
+
+**Akibatnya untuk arah dependency:** tipe hasil guard (`RequestAuth`) tinggal di
+`common/context/`, bukan di `core/auth/`. Kalau ia tinggal di modul `core`, maka
+`common` harus mengimpor dari `core` untuk mengetik `request.auth` — dan itu melanggar
+`ADR-0002` §1 (`common` tidak boleh mengimpor modul mana pun).
+
 ### Aturan yang mengikat kedua kanal
 
 1. **Setiap integration test mem-boot lewat `configureApp`.** Tidak ada test yang

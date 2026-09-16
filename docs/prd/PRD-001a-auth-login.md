@@ -1,7 +1,7 @@
 ---
 id: PRD-001a
 title: Auth — company minimal, user, argon2id, session Redis, dan halaman login
-status: review
+status: done
 priority: P0
 modules: [core]
 depends_on: [PRD-000]
@@ -695,7 +695,243 @@ menyentuh file yang akan dipakai sepanjang PRD ini.
 
 13. Test sesuai §15.
 14. Jalankan `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` — keempatnya exit 0.
-    Perbarui `docs/prd/README.md` dan isi `## Catatan Coder
+    Perbarui `docs/prd/README.md` dan isi `## Catatan Coder`.
+
+**Urutan commit yang disarankan:** utang PRD-000 → env + migrasi → password service →
+seed → session service → guard + controller → test backend → api client + halaman login
+→ test web.
+
+---
+
+## 14. Acceptance Criteria
+
+> **Catatan Mentor, 2026-09-16 (saat review):** bagian 14, 15, 16, dan Open Questions
+> sempat hilang dari file ini karena kerusakan di seam penyuntingan, dan dipulihkan
+> persis seperti aslinya saat review PRD-001a. Isinya tidak diubah — sesi Coder
+> mengerjakan dan membuktikan kriteria yang sama seperti yang tertulis di bawah ini.
+
+```text
+AC-001a-01  Login berhasil
+
+Given: seed sistem sudah dijalankan, dan .env memuat ADMIN_EMAIL + ADMIN_PASSWORD
+When:  POST /api/auth/login dikirim dengan email dan password dari env tersebut
+Then:  status 200,
+       body.user.email sama dengan ADMIN_EMAIL,
+       body.user.companyId sama dengan id Default Company,
+       body.user.isSuperadmin = true,
+       body TIDAK memuat password_hash maupun session id,
+       dan response memuat header Set-Cookie bernama oddo_session yang mengandung
+       HttpOnly, SameSite=Lax, dan Path=/
+```
+
+```text
+AC-001a-02  Session benar-benar ada di Redis, beserta index-nya
+
+Given: login pada AC-001a-01 baru saja berhasil
+When:  Redis diperiksa langsung dari dalam test
+Then:  key session:<sid> ada dan payload-nya memuat userId, companyId, dan createdAt,
+       TTL-nya > 0 dan <= 120 menit,
+       dan sid tersebut menjadi member dari SET user:<userId>:sessions
+```
+
+```text
+AC-001a-03  Tiga kegagalan login tidak bisa dibedakan
+
+Given: admin terdaftar dan aktif; ada juga satu user nonaktif di database
+When:  tiga request login dikirim — (a) email yang tidak terdaftar,
+       (b) email admin dengan password salah, (c) email user nonaktif dengan
+       password yang benar
+Then:  ketiganya menghasilkan status 401, code UNAUTHORIZED, dan message yang
+       PERSIS SAMA. Perbandingannya dilakukan atas ketiga body sekaligus,
+       bukan dicocokkan satu per satu ke string harapan.
+       Tidak satu pun dari ketiganya menghasilkan Set-Cookie
+```
+
+```text
+AC-001a-04  Bentuk error login tetap mengikuti ADR-0001 B8
+
+Given: API berjalan
+When:  login gagal karena password salah
+Then:  body memuat persis field statusCode, code, message, details, requestId, timestamp
+       dengan code = "UNAUTHORIZED" dan statusCode = 401
+```
+
+```text
+AC-001a-05  /me mengenali pemilik cookie
+
+Given: login berhasil dan cookie-nya disimpan
+When:  GET /api/auth/me dipanggil dengan cookie itu
+Then:  status 200 dan body.email sama dengan email yang dipakai login,
+       body.session.absoluteExpiresAt berjarak ~8 jam dari waktu login
+When:  GET /api/auth/me dipanggil TANPA cookie
+Then:  status 401 dengan code UNAUTHORIZED
+```
+
+```text
+AC-001a-06  Sliding expiration benar-benar memperpanjang
+
+Given: session baru dibuat, lalu TTL-nya di Redis diturunkan secara manual
+       menjadi 60 detik dari dalam test
+When:  GET /api/auth/me dipanggil dengan cookie session itu
+Then:  status 200, dan TTL key session:<sid> di Redis kembali menjadi
+       mendekati 120 menit (toleransi beberapa detik)
+```
+
+```text
+AC-001a-07  Batas absolut tidak bisa dilewati sliding
+
+Given: sebuah session dibuat, lalu payload-nya di Redis diubah dari dalam test
+       sehingga createdAt bernilai 7 jam 59 menit yang lalu
+When:  GET /api/auth/me dipanggil
+Then:  status 200, DAN TTL key session:<sid> <= 60 detik —
+       bukan 120 menit, karena sisa umur absolutnya tinggal ~1 menit
+Given: createdAt session diubah menjadi 8 jam 1 menit yang lalu
+When:  GET /api/auth/me dipanggil
+Then:  status 401 dengan code UNAUTHORIZED,
+       key session:<sid> sudah TIDAK ada di Redis,
+       dan sid itu sudah TIDAK jadi member user:<userId>:sessions
+```
+
+```text
+AC-001a-08  Logout mematikan session di server
+
+Given: login berhasil dan cookie-nya disimpan
+When:  POST /api/auth/logout dipanggil dengan cookie itu
+Then:  status 204,
+       key session:<sid> hilang dari Redis,
+       sid hilang dari SET user:<userId>:sessions,
+       dan response menghapus cookie (Max-Age=0)
+When:  GET /api/auth/me dipanggil lagi dengan cookie yang sama
+Then:  status 401
+When:  POST /api/auth/logout dipanggil sekali lagi dengan cookie yang sama
+Then:  tetap status 204 (idempotent), bukan 401
+```
+
+```text
+AC-001a-09  Login di dua tempat menghasilkan dua session
+
+Given: admin login dua kali berturut-turut (dua cookie berbeda)
+When:  isi SET user:<userId>:sessions diperiksa
+Then:  SET itu berisi dua sid,
+       dan setelah logout memakai cookie pertama, SET berisi tepat satu sid
+       yaitu milik cookie kedua, dan /me dengan cookie kedua masih 200
+```
+
+```text
+AC-001a-10  Seed admin create-only
+
+Given: seed sistem sudah pernah dijalankan
+When:  password_hash admin diubah langsung di database menjadi nilai penanda,
+       lalu `pnpm db:seed` dijalankan lagi
+Then:  perintah selesai tanpa error,
+       jumlah baris user tetap sama,
+       dan password_hash admin MASIH bernilai penanda tadi — tidak ditimpa
+       oleh ADMIN_PASSWORD
+```
+
+```text
+AC-001a-11  Konfigurasi TTL yang tidak masuk akal ditolak saat boot
+
+Given: .env diisi SESSION_IDLE_TTL_MINUTES=120 dan SESSION_ABSOLUTE_TTL_HOURS=1
+When:  `pnpm --filter @oddo/api run check:env` dijalankan
+Then:  proses keluar dengan exit code bukan 0,
+       dan keluarannya menyebut KEDUA nama variable tersebut
+```
+
+```text
+AC-001a-12  Halaman login bisa dipakai manusia
+
+Given: apps/web berjalan
+When:  halaman /login dibuka
+Then:  ada field Email, field Password, dan tombol "Masuk",
+       setiap field punya <label> yang terhubung lewat htmlFor
+When:  form dikirim dan API menjawab 401
+Then:  pesan dari field message ditampilkan di halaman dengan role="alert",
+       dan halaman TIDAK menampilkan code, requestId, atau stack trace
+When:  form dikirim dan API menjawab 200
+Then:  browser diarahkan ke "/"
+When:  fetch gagal total (API mati)
+Then:  halaman menampilkan pesan yang memuat nilai API_URL apa adanya
+```
+
+```text
+AC-001a-13  Rahasia tidak bocor ke log
+
+Given: LOG_LEVEL di .env.test sudah bernilai warn
+When:  seluruh `pnpm test` dijalankan dengan keluaran log ditangkap
+Then:  keluaran itu TIDAK memuat nilai ADMIN_PASSWORD,
+       TIDAK memuat session id mana pun,
+       dan TIDAK memuat substring "oddo_session="
+```
+
+```text
+AC-001a-14  Pagar kualitas tetap hijau
+
+Given: seluruh implementasi PRD ini selesai
+When:  `pnpm lint`, `pnpm typecheck`, `pnpm test`, dan `pnpm build` dijalankan
+Then:  keempatnya exit code 0, tanpa eslint-disable baru di seluruh repo,
+       dan laporan test menunjukkan 0 skipped dan 0 todo
+```
+
+---
+
+## 15. Test Plan
+
+| Level | Yang diuji | Catatan |
+|---|---|---|
+| Unit (api) | `PasswordService`: hash lalu verify benar; verify menolak password salah; dua hash dari password sama berbeda (salt acak) | Murni, tanpa DB. Boleh memakai parameter argon2 yang sama — jangan diturunkan supaya cepat |
+| Unit (api) | Perhitungan TTL: `min(idle, sisa absolut)`; sisa absolut negatif → session dianggap mati | Fungsi murni terpisah, supaya AC-001a-07 tidak bergantung pada jam dinding |
+| Unit (api) | `envSchema`: valid; absolut ≤ idle ditolak; `ADMIN_PASSWORD` < 12 karakter ditolak | |
+| Integration (api) | Login sukses, tiga jalur gagal yang identik, bentuk error B8 | Postgres + Redis nyata |
+| Integration (api) | `/me` dengan dan tanpa cookie; perpanjangan TTL; batas absolut (dua kasus di AC-001a-07) | Manipulasi Redis langsung dari test untuk mengatur `createdAt` dan TTL |
+| Integration (api) | Logout: 204, key hilang, `SREM` terjadi, idempotent | |
+| Integration (api) | Dua session berdampingan + isi index setelah satu logout | |
+| Integration (api) | Seed create-only (AC-001a-10) | Jalankan fungsi seed langsung, bukan lewat CLI |
+| Integration (api) | Redis mati saat `/me` → 500, bukan 401 | Arahkan `REDIS_URL` ke port mati, pola PRD-000 |
+| Unit (web) | Halaman login: render, state loading, pesan error dari API, redirect saat sukses, pesan "tidak dapat menghubungi server" | Vitest + Testing Library, `fetch` di-mock, `next/navigation` di-mock |
+
+**Data uji / fixture yang dibutuhkan:** seed sistem (company + admin) dan **satu user
+nonaktif** untuk AC-001a-03. User nonaktif dibuat di dalam test, bukan di seed sistem —
+lingkungan production tidak butuh user mati.
+
+**Isolasi:** tetap seperti `ADR-0005` — `oddo_test` dan Redis index `/1`. Tambahan untuk
+PRD ini: pembersihan `beforeAll` yang sudah ada mem-`TRUNCATE` tabel Postgres, tapi
+**tidak** menyentuh Redis. Tambahkan pembersihan key Redis milik test (`session:*` dan
+`user:*:sessions` pada index `/1`) di helper test, supaya sisa session dari file test
+sebelumnya tidak mencemari hitungan di AC-001a-09.
+
+---
+
+## 16. Definition of Done
+
+- [x] Semua AC di bagian 14 lulus
+- [x] Test unit + integration ditulis dan hijau (`pnpm test` exit 0)
+- [x] Permission & record rule — **tidak berlaku di PRD ini**; `is_superadmin` sudah ada
+      di tabel tapi belum dipakai memutuskan apa pun
+- [x] Audit log — **tidak berlaku di PRD ini**; logging terstruktur sesuai §12.1 sudah jalan
+- [x] Error state & validasi sesuai bagian 9, 10, dan 11
+- [x] `pnpm lint` (dengan `--max-warnings=0`), `pnpm typecheck`, dan `pnpm build` bersih
+- [x] Empat env var baru ada di `envSchema`, `.env.example`, **dan** `.env.test`
+- [x] File migrasi Prisma di-commit; migrasi lama tidak disunting
+- [x] Utang PRD-000 butir 1–4 (`PRODUCT-SCOPE` §4.1) benar-benar selesai
+- [x] `README.md` diperbarui kalau ada langkah setup baru (env var admin)
+- [x] `docs/prd/README.md` diperbarui
+- [x] Bagian "Catatan Coder" di bawah diisi
+
+---
+
+## Open Questions
+
+> Diisi oleh sesi Coder saat menemukan ambiguitas. Jangan menebak — set `status: blocked`.
+> Dijawab oleh sesi Mentor langsung di kolom sebelahnya.
+
+| # | Pertanyaan | Diajukan oleh | Jawaban Mentor | Tanggal |
+|---|---|---|---|---|
+| | | | | |
+
+---
+
+## Catatan Coder
 
 > Diisi oleh sesi Coder setelah implementasi selesai.
 
@@ -898,3 +1134,91 @@ curl -b /tmp/cj http://localhost:3001/api/auth/me                    # 401
 # set SESSION_ABSOLUTE_TTL_HOURS=1 di .env, lalu:
 pnpm --filter @oddo/api run check:env                                # exit 1, menyebut kedua variable
 ```
+
+---
+
+## Review Mentor — penutupan PRD-001a (2026-09-16)
+
+> Ditulis sesi Mentor. Yang mengikat PRD berikutnya sudah dipindahkan ke ADR atau ke
+> `docs/PRODUCT-SCOPE.md` §4.2 — tidak ada keputusan yang ditinggal sebagai catatan di
+> dokumen yang sudah `done`.
+
+### Cacat dokumen yang ditemukan dan diperbaiki
+
+Bagian **14 (Acceptance Criteria), 15 (Test Plan), 16 (Definition of Done), dan
+Open Questions hilang** dari file ini — terpotong di seam antara teks `` `## Catatan
+Coder` `` di §13 langkah 14 dan heading `## Catatan Coder` yang sesungguhnya, lengkap
+dengan backtick penutup yang ikut hilang. Kerusakannya sudah ada di commit `68bb0b3`,
+yaitu versi sebelum sesi Coder menulis kode, jadi penyebabnya tidak bisa ditelusuri ke
+salah satu sesi dan tidak dituduhkan ke siapa pun.
+
+Yang bisa dipastikan: sesi Coder **membacanya dalam keadaan utuh** — catatannya mengutip
+isi §15 (pembersihan key Redis di helper test) dan detail AC-001a-06 (TTL diturunkan ke
+60 detik), keduanya hanya ada di bagian yang hilang. Keempat bagian dipulihkan persis
+seperti aslinya saat review ini, sebelum status dinaikkan. Menandai PRD `done` terhadap
+acceptance criteria yang tidak ada di repo tidak berarti apa-apa.
+
+### Hasil verifikasi
+
+**14 dari 14 Acceptance Criteria lulus.** Lima perintah dijalankan ulang oleh Mentor,
+exit code diambil langsung:
+
+| Perintah | Exit code | Hasil |
+|---|---|---|
+| `pnpm install --frozen-lockfile` | 0 | Lockfile sinkron; `postinstall: prisma generate` jalan |
+| `pnpm lint` | 0 | Nol temuan, `--max-warnings=0` |
+| `pnpm typecheck` | 0 | `shared`, `api`, `web` bersih |
+| `pnpm test` | 0 | api `13 suite / 72 test`, web `2 file / 13 test`, 0 skipped, 0 todo |
+| `pnpm build` | 0 | `Compiled successfully`, 5/5 halaman |
+
+AC-001a-13 diperiksa ulang atas keluaran test yang ditangkap penuh: nilai
+`ADMIN_PASSWORD` **0** kemunculan, `oddo_session=` **0** kemunculan.
+
+**Empat AC dibuktikan ulang langsung terhadap sistem berjalan**, bukan lewat tabel bukti:
+
+| Yang diuji | Cara Mentor membuktikannya | Hasil |
+|---|---|---|
+| **AC-001a-10** seed create-only | `ADMIN_PASSWORD` di `.env` diganti jadi `TotallyDifferent!9999`, lalu `pnpm db:seed`. md5 `password_hash` sebelum dan sesudah: `905d18d2…` = `905d18d2…`, jumlah baris user tetap 1. **Lebih jauh dari yang diminta AC:** login memakai password **lama** tetap 200, login memakai password baru dari `.env` dijawab **401** | ✅ lulus |
+| **Sliding TTL** | Login, `/me` pertama, TTL diturunkan manual jadi 60 detik, `/me` kedua. `idleExpiresAt` `11:38:53.117Z` → `11:39:04.790Z` (maju 11,7 detik), `absoluteExpiresAt` `17:38:42.186Z` → `17:38:42.186Z` (**tidak bergerak sedetik pun**), TTL Redis kembali ke 7200 | ✅ lulus |
+| **Index sesi** | Login dua kali (dua cookie jar). `SMEMBERS user:<id>:sessions` berisi dua sid, `SCARD` = 2, TTL index 28789 detik (~8 jam). Logout cookie pertama → `SCARD` = 1, sisanya persis sid kedua, `EXISTS session:<sid1>` = 0, `/me` device-1 = 401 dan device-2 = 200 | ✅ lulus |
+| **Batas absolut** | `createdAt` session yang masih hidup dimundurkan jadi 8 jam 1 menit lalu (`SET … KEEPTTL`, TTL tetap 7161). `/me` → **401 `UNAUTHORIZED`**, `EXISTS session:<sid>` = **0**, `SISMEMBER` = **0** | ✅ lulus |
+
+Cookie yang diterbitkan juga diperiksa apa adanya dari header:
+`oddo_session=<43 karakter base64url>; Max-Age=28800; Path=/; HttpOnly; SameSite=Lax` —
+sesuai §2.4, tanpa `Secure` karena `NODE_ENV=development`.
+
+AC yang tidak dijalankan ulang Mentor: AC-001a-11 (butuh merusak `.env`, sudah dikunci
+unit test) dan AC-001a-12 (butuh browser; sudah ditutup 7 test komponen).
+
+### Jawaban atas "Hal yang perlu diputuskan Mentor"
+
+| # | Butir Coder | Keputusan | Mendarat di |
+|---|---|---|---|
+| 1 | Waktu respons login membocorkan email terdaftar | **Ditutup di PRD-001b, tidak ditunda ke V1.** BR-AUTH-002 sudah berjanji tiga jalur kegagalan tidak bisa dibedakan; janji itu bocor lewat waktu. Rate limiting tetap V1 — itu kebijakan, sedangkan ini menepati janji yang sudah dibuat | `PRODUCT-SCOPE` §4.2 butir 7, lengkap dengan tuntutan AC yang mengukur selisih waktu |
+| 2 | PRD-001b menaikkan `AuthGuard` jadi `APP_GUARD` | **Ya**, itu memang nilai yang diantarkan PRD-001b. Inventaris `@Public()` hari ini (`/api/health`, `/api/auth/login`, `/api/auth/logout`) dicatat sebagai titik awal | Sudah jadi scope PRD-001b di `PRODUCT-SCOPE` §4 |
+| 3 | `listByUser()` belum punya permukaan HTTP | **Diterima.** Memang begitu rancangannya — strukturnya dibuat sekarang, pemakainya lahir di PRD-002 saat user dinonaktifkan. Ia sudah diuji langsung (4 test), jadi bukan kode mati yang tidak terbukti | Tidak perlu tindakan |
+| 4 | Nilai `APP_VERSION` masih tinggal di seed | **Diterima, tidak diubah.** Temuan F-3 menyangkut *key* yang terduplikasi, dan itu sudah disatukan. Memindahkan *nilai*-nya sekarang adalah abstraksi untuk kebutuhan yang belum ada (`PRODUCT-SCOPE` §7 no. 2) | Tidak perlu tindakan |
+| 5 | `package.json#prisma` deprecated | **Sudah tercatat** sebagai utang teknis berpemicu sejak review PRD-000 | `PRODUCT-SCOPE` §4.1, tabel utang teknis |
+| 6 | Butir 5–6 §4.1 dialokasikan ke PRD-001b | **Benar**, dan statusnya sekarang ditegaskan: butir 1–4 selesai, butir 5–6 masih terbuka | `PRODUCT-SCOPE` §4.1 |
+
+### Putusan atas deviasi Coder
+
+| # | Putusan | Alasan | Mendarat di |
+|---|---|---|---|
+| D-1 | **Setuju** — normalisasi, bukan penolakan | §2.4 menulis "email, huruf kecil" yang memang bisa dibaca dua arah, jadi ini mengisi ambiguitas PRD, bukan melanggarnya. Normalisasi membuat invariant BR-AUTH-007 tidak bisa dilanggar dari pintu mana pun, sementara penolakan hanya memindahkan masalah ke pemakai. Aturannya mengikat PRD-002 (layar user) dan PRD-004 (email partner), jadi dinaikkan jadi amandemen ADR | Amandemen `ADR-0002` §4 butir 1 dan 2 |
+| D-2 | **Setuju** | `setup-db.ts` yang juga menghapus key Redis adalah nama yang berbohong. Perubahan nama file, nol perubahan perilaku | Tidak perlu ADR |
+
+Dua catatan implementasi Coder yang **bukan** deviasi tapi mengikat PRD berikutnya, dan
+karena itu ikut dinaikkan jadi amandemen ADR:
+
+| Temuan | Kenapa mengikat | Mendarat di |
+|---|---|---|
+| Guard berjalan **sebelum** interceptor, sehingga guard menaruh hasil di objek request dan interceptor yang mengangkatnya ke `RequestContext` | `PermissionGuard` (PRD-002) dan `AuditInterceptor` akan menabrak urutan yang sama. Tanpa aturan tertulis, PRD-002 akan mencoba `RequestContext.run()` dari dalam guard dan scope-nya tertutup sebelum handler jalan. Sekalian menjelaskan kenapa tipe `RequestAuth` wajib tinggal di `common/context/`, bukan di `core/auth/` | Amandemen `ADR-0004` |
+| Kegagalan Redis dibiarkan naik jadi 500, tidak diterjemahkan jadi 401 | Berlaku untuk setiap dependency yang datang kemudian. Satu Redis tumbang tidak boleh memberi tahu seluruh user bahwa kredensial mereka salah | Amandemen `ADR-0001` B8 |
+| Tabel `user` adalah kata kunci Postgres | Setiap migrasi tulisan tangan berikutnya menyentuh tabel ini. `SELECT * FROM user` tanpa kutip bukan error sintaks — ia mengembalikan nama user database. Kegagalan diam lebih mahal daripada kegagalan berisik | Amandemen `ADR-0002` §4 butir 3 |
+
+### Status penutupan
+
+PRD-001a **`done`**. Yang diwariskan: satu baris In Scope wajib untuk PRD-001b
+(`PRODUCT-SCOPE` §4.2 butir 7 — timing attack), butir 5–6 §4.1 yang masih terbuka, dan
+tiga amandemen ADR di atas.

@@ -26,7 +26,8 @@
 | ID | Judul | Modul | Prioritas | Depends on | Status | Terakhir diubah |
 |---|---|---|---|---|---|---|
 | [PRD-000](PRD-000-project-scaffolding.md) | Project scaffolding | infra | P0 | — | `done` | 2026-09-16 |
-| [PRD-001a](PRD-001a-auth-login.md) | Auth: bisa login | core/auth | P0 | PRD-000 | `review` | 2026-09-16 |
+| [PRD-001a](PRD-001a-auth-login.md) | Auth: bisa login | core/auth | P0 | PRD-000 | `done` | 2026-09-16 |
+| [PRD-001b](PRD-001b-auth-enforcement.md) | Auth: tidak bisa dilewati | core/auth | P0 | PRD-001a | `ready` | 2026-09-16 |
 
 ### Rencana PRD berikutnya (belum ditulis)
 
@@ -35,11 +36,12 @@ Urutan dan cakupannya ada di [`docs/PRODUCT-SCOPE.md`](../PRODUCT-SCOPE.md) bagi
 > **Bawaan wajib dari review PRD-000** — enam baris In Scope (butir 1–4 → PRD-001a,
 > butir 5–6 → PRD-001b) dan satu acceptance criteria untuk PRD-002 sudah ditetapkan di
 > [`PRODUCT-SCOPE` §4.1](../PRODUCT-SCOPE.md#41-bawaan-wajib-dari-review-prd-000-2026-09-16).
-> PRD-001b dan PRD-002 tidak boleh ditulis tanpa memuatnya; PRD-001a sudah memuatnya.
+> PRD-001a dan PRD-001b sudah memuatnya. **PRD-002 belum ditulis dan tidak boleh ditulis
+> tanpa memuat acceptance criteria zona lint antar-modul** di
+> [`PRODUCT-SCOPE` §4.1](../PRODUCT-SCOPE.md#41-bawaan-wajib-dari-review-prd-000-2026-09-16).
 
 | ID | Judul | Depends on |
 |---|---|---|
-| PRD-001b | Auth: tidak bisa dilewati (guard global, proteksi route, E2E) | 001a |
 | PRD-002 | Company, User, Role & Permission | 001b |
 | PRD-003 | Sequence, Currency, Tax | 002 |
 | PRD-004 | Partner (customer & vendor) | 002 |
@@ -70,7 +72,7 @@ Urutan dan cakupannya ada di [`docs/PRODUCT-SCOPE.md`](../PRODUCT-SCOPE.md) bagi
 | F1 | Ruang lingkup produk & modul MVP | [`docs/PRODUCT-SCOPE.md`](../PRODUCT-SCOPE.md) | ✅ selesai |
 | F2 | Tech stack | [`ADR-0001`](../adr/ADR-0001-tech-stack.md) | ✅ selesai |
 | F3 | Arsitektur inti | [`ADR-0002`](../adr/ADR-0002-arsitektur-inti.md) + [`ADR-0003`](../adr/ADR-0003-model-pencatatan-stok.md) | ✅ selesai |
-| F4 | Data model fondasi | PRD-001 & PRD-002 | siap ditulis — PRD-000 `done` per 2026-09-16 |
+| F4 | Data model fondasi | PRD-001a `done`, lanjut PRD-001b & PRD-002 | 🚧 berjalan — `user` + `company` sudah ada per 2026-09-16 |
 
 ---
 

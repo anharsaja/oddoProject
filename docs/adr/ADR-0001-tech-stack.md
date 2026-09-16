@@ -193,6 +193,19 @@ transaksi, constraint, dan locking.
 > PRD-000 menaruhnya sementara di `apps/api/src/common/api-error.ts` karena web belum
 > mengonsumsinya — itu diterima untuk PRD-000 saja. **PRD-001 wajib memindahkannya ke
 > `@oddo/shared`**, karena layar login adalah konsumen pertamanya.
+> *(Selesai dikerjakan di PRD-001a.)*
+
+> **Amandemen 2026-09-16 (review PRD-001a).** **Kegagalan infrastruktur tidak pernah
+> diterjemahkan jadi error domain.** Database atau Redis yang tidak bisa dihubungi
+> menghasilkan `500 INTERNAL_ERROR` — bukan `401 UNAUTHORIZED`, bukan `404 NOT_FOUND`,
+> bukan hasil kosong.
+>
+> Contoh yang memunculkan aturan ini: kalau `SessionService` menerjemahkan Redis mati
+> jadi "session tidak valid", maka satu Redis yang tumbang akan memberi tahu **seluruh**
+> user yang sedang login bahwa kredensial mereka salah. Mereka akan mencoba login ulang,
+> gagal lagi, dan menghubungi support — sementara penyebabnya tidak ada hubungannya
+> dengan kredensial. Aturan yang sama berlaku untuk setiap dependency yang datang
+> kemudian (S3, mail, gateway pembayaran).
 
 ### B9. Logging → **pino**, terstruktur, JSON
 

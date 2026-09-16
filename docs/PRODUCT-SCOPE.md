@@ -128,6 +128,24 @@ PRD-001 **sudah diputuskan dipecah** (owner, 2026-09-16) jadi PRD-001a "bisa log
 PRD-001b "tidak bisa dilewati" — dipecah menurut nilai yang diantarkan, bukan menurut
 layer, supaya keduanya tetap *vertical slice* seperti yang disyaratkan `ADR-0002` §6.
 Butir 1–4 di atas masuk **001a**, butir 5–6 masuk **001b**.
+**Status per review PRD-001a (2026-09-16): butir 1–4 ✅ selesai dan diverifikasi.
+Butir 5–6 masih terbuka, menunggu PRD-001b.**
+
+### 4.2 Bawaan wajib dari review PRD-001a (2026-09-16)
+
+**Wajib masuk In Scope PRD-001b**, sebagai tambahan atas butir 5–6 di atas:
+
+| # | Yang harus dikerjakan | Asal |
+|---|---|---|
+| 7 | Tutup **timing attack** pada login: email yang tidak terdaftar harus tetap melewati satu verifikasi argon2id terhadap hash dummy tetap, sehingga waktu responsnya sekelas dengan email yang terdaftar. Wajib punya acceptance criteria tersendiri yang mengukur selisih waktu, bukan sekadar menyebut kode dummy-nya ada | Pertanyaan Coder #1 pada PRD-001a |
+
+Alasan butir 7 tidak ditunda ke V1 bersama rate limiting: BR-AUTH-002 di PRD-001a sudah
+berjanji bahwa tiga jalur kegagalan login **tidak bisa dibedakan**. Janji itu ditepati
+untuk *isi* respons tapi bocor lewat *waktu* respons — `~1 ms` untuk email asing versus
+`~100 ms` untuk email terdaftar. Selama itu belum ditutup, halaman login tetap bisa
+dipakai memetakan siapa saja yang punya akun di sini, dan aturan yang sudah kita tulis
+sendiri tidak benar-benar berlaku. Rate limiting adalah kebijakan; ini perbaikan janji
+yang sudah terlanjur dibuat.
 
 **Wajib masuk PRD-002 sebagai acceptance criteria tersendiri**, ditulis persis seperti
 ini supaya tidak melemah saat disalin:

@@ -239,7 +239,24 @@ confirm(@Param('id') id: string, @CurrentCompany() companyId: string) { ... }
 >
 > Bentuk yang benar: `updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(6)`.
 > Tabel `system_setting` dari PRD-000 belum memakainya; retrofit-nya masuk PRD-001
-> sebagai satu migrasi kecil.
+> sebagai satu migrasi kecil. *(Selesai dikerjakan di PRD-001a.)*
+
+> **Amandemen 2026-09-16 (review PRD-001a) — identitas, normalisasi, dan penamaan tabel.**
+>
+> 1. **Kolom identitas dinormalisasi saat masuk, bukan ditolak.** Email disimpan huruf
+>    kecil dan dinormalisasi di setiap pintu masuk — env var, seed, DTO, dan layar.
+>    Menolak `Admin@Oddo.Local` hanya memindahkan masalah ke pemakai; menormalisasinya
+>    membuat invariant-nya tidak bisa dilanggar dari mana pun. Normalisasi tetap
+>    **didampingi** CHECK constraint (`CHECK (email = lower(email))`) — normalisasi
+>    aplikasi adalah kenyamanan, constraint database adalah jaminan.
+> 2. **Unik di tingkat instance, bukan per company.** Email login unik global selama
+>    UI masih single-company (D-03), karena form login tidak punya pilihan company dan
+>    satu email di dua company membuat "siapa yang login" jadi ambigu.
+> 3. **Nama tabel yang merupakan kata kunci SQL wajib dikutip di raw SQL.** Tabel `user`
+>    adalah kata kunci Postgres. Prisma selalu mengutip identifier sehingga aman, tapi
+>    setiap migrasi atau query yang ditulis tangan wajib menulis `"user"` — tanpa kutip,
+>    `SELECT * FROM user` bukan error sintaks melainkan mengembalikan nama user database.
+>    Kegagalan yang diam seperti ini lebih mahal daripada kegagalan yang berisik.
 
 ### Apa yang dihitung sebagai "tabel bisnis"
 
