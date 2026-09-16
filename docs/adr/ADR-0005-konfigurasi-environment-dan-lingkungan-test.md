@@ -137,6 +137,45 @@ Konsekuensinya mengikat: kalau suatu saat ada route di luar `/api` (misalnya `/m
 atau `/healthz` untuk load balancer), PRD yang menambahkannya **wajib** memasang logger
 untuk route itu secara eksplisit dan menyebutkannya di bagian 12 PRD-nya.
 
+### 6. Browser E2E — Chrome yang terpasang di mesin, bukan Chromium bundel
+
+*Ditambahkan 2026-09-16 atas keputusan owner saat PRD-001b berjalan. Mengikat setiap
+PRD yang punya E2E sesudahnya, bukan hanya PRD-001b.*
+
+E2E dijalankan di **Google Chrome stable yang sudah terpasang di mesin**
+(`channel: 'chrome'`), dengan **satu** project Playwright. Tidak ada Firefox, tidak ada
+WebKit, dan browser bundel Playwright **tidak diunduh**.
+
+Alasannya sederhana dan sengaja tidak dibesar-besarkan: Chrome sudah ada di mesin, dan
+unduhan ~130 MB per mesin adalah biaya yang tidak dibayar oleh manfaat apa pun selama
+aplikasi ini hanya menargetkan satu browser. Menguji tiga engine adalah keputusan yang
+layak diambil kalau nanti ada bug lintas-browser yang nyata — bukan sebelum itu.
+
+**Escape hatch wajib ada, dan bentuknya sudah ditetapkan.** Channel dibaca dari variable
+`PLAYWRIGHT_CHANNEL`:
+
+| Nilai | Yang dipakai |
+|---|---|
+| tidak diset | `chrome` — Chrome yang terpasang di mesin (bawaan) |
+| diset kosong (`PLAYWRIGHT_CHANNEL=`) | Chromium bundel Playwright — **ini yang dipakai CI** |
+| diset ke channel lain (mis. `msedge`) | channel itu, apa adanya |
+
+`PLAYWRIGHT_CHANNEL` adalah **variable milik Playwright, bukan variable aplikasi**.
+Ia **tidak** masuk `envSchema` NestJS, tidak masuk `.env.example`, dan tidak masuk
+`.env.test` — aturan "tiga tempat" di bagian "Yang jadi wajib mulai sekarang" nomor 1
+tidak berlaku untuknya. Tempatnya adalah dokumentasi: `README.md` dan config Playwright.
+Memasukkannya ke `envSchema` akan membuat aplikasi menolak boot di mesin yang tidak
+pernah menjalankan E2E.
+
+**Harga yang dibayar, diterima sadar:**
+
+| Harga | Kapan terasa |
+|---|---|
+| Chrome memperbarui dirinya sendiri | Perilaku E2E bisa berubah tanpa satu baris kode pun berubah. Kegagalan seperti ini menipu karena `git log` tidak memuat penyebabnya |
+| Versi browser tidak terkunci lockfile | Dua developer bisa menjalankan test yang sama di dua versi browser berbeda, dan keduanya merasa "sudah sesuai repo" |
+| Mesin tanpa Chrome tidak bisa menjalankan E2E | Prasyarat baru yang wajib ada di `README.md`, lengkap dengan pesan error aslinya |
+| CI butuh Chrome di runner | Atau dijalankan dengan `PLAYWRIGHT_CHANNEL=` kosong. Escape hatch di atas ada supaya CI tidak perlu menyunting file mana pun |
+
 ---
 
 ## Konsekuensi
@@ -163,6 +202,9 @@ untuk route itu secara eksplisit dan menyebutkannya di bagian 12 PRD-nya.
    `.env`.
 4. Test tidak pernah mematikan container untuk mensimulasikan dependency mati — arahkan
    URL-nya ke port yang tidak didengarkan siapa pun.
+5. E2E memakai satu project Playwright di Chrome yang terpasang di mesin (§6), dan
+   channel-nya selalu dibaca dari `PLAYWRIGHT_CHANNEL` — tidak pernah di-hardcode.
+   PRD yang menambah E2E tidak perlu memutuskan ulang soal browser.
 
 ## Cara mengecek kepatuhan
 
@@ -177,5 +219,9 @@ untuk route itu secara eksplisit dan menyebutkannya di bagian 12 PRD-nya.
 
 - Kalau test mulai dijalankan paralel antar-file (`--runInBand` dilepas), karena saat itu
   satu database test bersama tidak lagi cukup — perlu schema per worker.
-- Kalau CI masuk (V1), karena CI menyuntikkan env var lewat secret store, bukan file.
+- Kalau CI masuk (V1), karena CI menyuntikkan env var lewat secret store, bukan file —
+  dan karena saat itu §6 harus diputuskan: pasang Chrome di runner, atau jalankan dengan
+  `PLAYWRIGHT_CHANNEL=` kosong.
+- Kalau muncul bug yang hanya terjadi di Safari atau Firefox, atau aplikasi ini mulai
+  dipakai di luar Chrome → tinjau §6, karena saat itu menguji satu engine tidak lagi cukup.
 - Kalau jumlah env var melewati ~20 dan `.env.example` mulai perlu dikelompokkan per modul.

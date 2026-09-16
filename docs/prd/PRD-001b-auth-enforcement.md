@@ -83,6 +83,12 @@ sampai PRD ini selesai, pernyataan itu belum ditegakkan apa pun.
   tabel `user` dan `company`, serta seed admin sudah ada dan hijau.
 - Docker berjalan; `oddo_dev` dan `oddo_test` dua-duanya ada (`ADR-0005` §4).
 - Developer menjalankan E2E di mesinnya sendiri. Belum ada CI (`PRODUCT-SCOPE` §3, V1).
+- **Google Chrome stable terpasang di mesin developer.** E2E memakai Chrome yang sudah
+  ada, bukan Chromium bundel Playwright (keputusan owner 2026-09-16, `ADR-0005` §6).
+  Kalau Chrome tidak ada, `pnpm test:e2e` gagal saat menyalakan browser — `README.md`
+  wajib memuat pesan error aslinya apa adanya beserta dua jalan keluarnya: pasang
+  Chrome, atau jalankan dengan `PLAYWRIGHT_CHANNEL=` kosong lalu
+  `npx playwright install chromium` sekali.
 
 ### 2.4 Konvensi tetap — nilai konkret, bukan saran
 
@@ -479,6 +485,50 @@ kejadian sehari-hari (monitoring, tab lama, bot) dan tidak layak membanjiri log 
       `NEXT_PUBLIC_API_URL` sesuai §2.4
     - `baseURL: 'http://localhost:3100'`, `timeout` webServer 120 detik
     - `globalSetup` yang menjalankan `prisma migrate deploy` + `seedSystem` ke `oddo_test`
+    - **`projects` berisi tepat SATU entri** yang memakai **Google Chrome yang sudah
+      terpasang di mesin**, bukan Chromium bundel Playwright. Tidak ada firefox, tidak
+      ada webkit. Keputusan owner, 2026-09-16 — lihat `ADR-0005` §6
+
+    **13a. Channel browser dibaca dari `PLAYWRIGHT_CHANNEL`, bukan di-hardcode.**
+
+    ```ts
+    // SPESIFIKASI — apps/web/playwright.config.ts
+    const raw = process.env.PLAYWRIGHT_CHANNEL
+    const channel = raw === undefined ? 'chrome' : raw === '' ? undefined : raw
+
+    projects: [{ name: 'chrome', use: { ...devices['Desktop Chrome'], channel } }]
+    ```
+
+    Tiga hal yang wajib persis seperti di atas:
+
+    - **`??` dan `||` dua-duanya SALAH di sini.** `raw ?? 'chrome'` tidak menangkap
+      string kosong, dan `raw || 'chrome'` justru mengubah string kosong jadi `'chrome'` —
+      padahal string kosong adalah cara CI meminta Chromium bundel. Perbandingan
+      eksplisit terhadap `undefined` dan `''` adalah satu-satunya bentuk yang benar.
+    - **`channel` ditulis SESUDAH spread `...devices['Desktop Chrome']`.** Sebagian versi
+      Playwright menaruh `channel` di dalam device descriptor itu sendiri; menulis
+      `channel` lebih dulu berarti nilai kita ditimpa, dan `channel: undefined` untuk
+      Chromium bundel tidak akan pernah berlaku.
+    - Ekstrak penyelesaian channel jadi fungsi murni (mis. `resolvePlaywrightChannel(raw)`)
+      supaya ketiga cabangnya bisa diuji unit **tanpa** menjalankan browser apa pun.
+
+    **13b. `pnpm install` tidak boleh mengunduh browser bundel.**
+
+    Tidak menjalankan `npx playwright install` saja **belum tentu cukup** — paket
+    `@playwright/test` punya install script yang bisa mengunduh browser saat
+    `pnpm install`. Coder wajib **memverifikasi sendiri** apakah unduhan itu terjadi di
+    setup ini, dan kalau iya, mematikannya lewat salah satu dari dua mekanisme yang
+    tersedia: variable `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, atau daftar build script
+    pnpm di `package.json`. Mana pun yang dipakai, cara kerjanya ditulis di `README.md`.
+    Buktinya dituntut AC-001b-15 — jangan diasumsikan.
+
+    **13c. Trade-off yang diterima sadar** (ditulis di sini supaya tidak jadi kejutan):
+
+    | Harga | Akibatnya kapan |
+    |---|---|
+    | Chrome memperbarui dirinya sendiri | E2E bisa berubah perilaku tanpa satu baris kode pun berubah. Kegagalan seperti ini menipu karena `git log` tidak memuat penyebabnya — periksa versi Chrome sebelum menyalahkan kode |
+    | Browser E2E tidak lagi terkunci oleh lockfile | Dua developer bisa menjalankan test yang sama di dua versi browser berbeda |
+    | CI butuh Chrome di runner-nya | Atau jalankan dengan `PLAYWRIGHT_CHANNEL=` (kosong) supaya memakai Chromium bundel. Itulah gunanya escape hatch di 13a — CI tidak perlu menyunting file mana pun |
 14. Satu file E2E `e2e/auth.spec.ts` yang menempuh alur sungguhan: buka `/` tanpa cookie
     → mendarat di `/login?next=%2F` → login → mendarat di `/` dan nama admin terlihat →
     buka `/health` → tekan `Keluar` → mendarat di `/login` → buka `/` lagi → ditolak lagi.
@@ -604,13 +654,16 @@ Then:  browser dialihkan ke / tanpa menampilkan form login
 ```text
 AC-001b-10  E2E menempuh alur sungguhan di browser
 
-Given: `pnpm test:e2e` dijalankan pada repo bersih
+Given: `pnpm test:e2e` dijalankan pada repo bersih, dan Google Chrome terpasang
 When:  suite Playwright selesai
 Then:  exit code 0, dan alur berikut terbukti dalam satu test:
        buka / tanpa cookie -> mendarat di /login?next=%2F
        -> login dengan admin dari .env.test -> mendarat di / dan nama "Administrator"
        terlihat -> buka /health tanpa masalah -> tekan Keluar -> mendarat di /login
        -> buka / lagi -> kembali ditolak ke /login
+
+       DAN laporan Playwright menunjukkan test itu berjalan di project bernama
+       "chrome" — satu project, bukan tiga. Tidak ada baris firefox maupun webkit
 ```
 
 ```text
@@ -630,12 +683,39 @@ kunci Postgres (ADR-0002 §4 amandemen).
 ```
 
 ```text
-AC-001b-12  Playwright menolak memakai server yang sudah ada
+AC-001b-12  Konfigurasi Playwright: server sendiri, satu browser
 
 Given: playwright.config.ts
 When:  isinya diperiksa
 Then:  kedua entri webServer memuat reuseExistingServer: false secara eksplisit,
-       dan port yang dipakai adalah 3100 (web) serta 3101 (api) — bukan 3000/3001
+       port yang dipakai adalah 3100 (web) serta 3101 (api) — bukan 3000/3001,
+       projects berisi TEPAT SATU entri bernama "chrome",
+       `channel` ditulis SESUDAH spread devices['Desktop Chrome'],
+       dan tidak ada satu pun penyebutan firefox atau webkit di seluruh file
+```
+
+```text
+AC-001b-15  Channel browser bisa diganti tanpa menyunting file
+
+(a) LOGIKA — diuji unit, tanpa menjalankan browser
+Given: fungsi murni resolvePlaywrightChannel(raw)
+When:  dipanggil dengan tiga masukan
+Then:  undefined  -> 'chrome'        (bawaan: Chrome yang terpasang di mesin)
+       ''         -> undefined       (Chromium bundel — inilah yang dipakai CI)
+       'msedge'   -> 'msedge'        (channel lain diteruskan apa adanya)
+
+       Ketiganya diuji lewat fungsi itu, BUKAN dengan menjalankan Playwright,
+       karena cabang Chromium bundel justru tidak bisa dijalankan di mesin yang
+       sengaja tidak mengunduhnya
+
+(b) UNDUHAN — dibuktikan sekali, hasilnya ditempel di catatan Coder
+Given: node_modules dihapus
+When:  `pnpm install --frozen-lockfile` dijalankan dan keluarannya ditangkap penuh
+Then:  keluarannya TIDAK memuat baris pengunduhan browser
+       (tidak ada "Downloading Chromium", tidak ada "Downloading Firefox"),
+       dan direktori cache browser Playwright
+       (%USERPROFILE%\AppData\Local\ms-playwright di Windows) tetap tidak ada
+       ATAU isinya tidak bertambah dibanding sebelum install
 ```
 
 ```text
